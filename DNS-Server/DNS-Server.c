@@ -2,12 +2,19 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
 int debugLevel = 0;//0�����޵�����Ϣ��1������������Ϣ��2�������ӵ�����Ϣ
-char filename[100] = ".\dnsrelay.txt";
+// char filename[100] = ".\dnsrelay.txt";
+char filename[100] = "dnsrelay.txt";
 char dns_server_ip[20] = "192.168.0.1";
 
 #define BUFFER_SIZE 1024
 #define PORT 53
+#define PACKET_BUF_SIZE 4096
 
 typedef struct DNSHEADER    //DNS报文报头字段
 {
@@ -132,7 +139,6 @@ void DNS_Server()
 	}
 }
 
-
 void initCommand(int argc, char* argv[])
 {
     int count = 1;
@@ -165,8 +171,74 @@ void initCommand(int argc, char* argv[])
     printf("filename:%s\n", filename);
 }
 
+void printPackage (const char *szPrefix, struct sockaddr_in *sa, char *pbBuf, int bufLen, char mode){
+    // Print prefix, ip addr, port and buffer length
+    printf ("%s %s:%d (%d bytes) ", szPrefix, inet_ntoa (sa->sin_addr), ntohs (sa->sin_port), bufLen);
+
+    // mode 1 is simplified logging
+    if (mode == 2) return;
+
+    // Print raw buffer
+    for (int i = 0; i < bufLen; ++i) printf (" %02x", pbBuf[i]);
+
+    // Print packet content
+    int *pwBuf = (int *) pbBuf;
+    int flags = ntohs (pwBuf[1]);
+
+    printf ("\n\tID %04x, QR %d, OPCODE %d, AA %d, TC %d, RD %d, RA %d, Z %d, RCODE %d\n"
+            "\tQDCOUNT %u, ANCOUNT %u, NSCOUNT %u, ARCOUNT %u\n",
+            ntohs (pwBuf[0]),
+            (int) ((flags & 0x8000) >> 15),
+            (int) ((flags & 0x7800) >> 11),
+            (int) ((flags & 0x0400) >> 10),
+            (int) ((flags & 0x0200) >> 9),
+            (int) ((flags & 0x0100) >> 8),
+            (int) ((flags & 0x0080) >> 7),
+            (int) ((flags & 0x0070) >> 4),
+            (int) ((flags & 0x000F) >> 0),
+            ntohs (pwBuf[2]),
+            ntohs (pwBuf[3]),
+            ntohs (pwBuf[4]),
+            ntohs (pwBuf[5]));
+}
+
+void recvPakages(){
+    //创建socket对象
+    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+    //创建网络通信对象
+    struct sockaddr_in addr;
+	addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+	addr.sin_addr.s_addr = INADDR_ANY;
+    // addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	
+
+    //绑定socket对象与通信链接
+    int ret = bind (sockfd, (struct sockaddr *) &addr, sizeof (struct sockaddr_in));
+    if (ret < 0){
+		printf("Fail to bind port %d\n", PORT);
+		exit(1);
+	}
+    else{
+        printf("Successfully bound port %d\n", PORT);
+    }
+	
+    struct sockaddr_in saFrom;
+    socklen_t saLen = sizeof(saFrom);
+    while(1){
+        char buf[PACKET_BUF_SIZE];
+        int bufLen = recvfrom(sockfd, (char *) buf, PACKET_BUF_SIZE, 0, (struct sockaddr *) &saFrom, &saLen);
+        printPackage("RECV from", &saFrom, buf, bufLen, 1);
+    }
+
+    close(sockfd);
+}
+
 int main(int argc, char* argv[]) 
 {
     initCommand(argc, argv);
+    recvPakages();
+
     return 0;
 }
