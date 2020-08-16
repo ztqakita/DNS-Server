@@ -2,10 +2,31 @@
 #include <string.h>
 #include <stdlib.h>
 
+#include <time.h>
+#include <stdint.h>
+
+#ifdef _WIN32
+
+#pragma comment(lib, "ws2_32.lib")
+#include <WinSock2.h>
+#include <Ws2tcpip.h>
+#include <Windows.h>
+// #define _WINSOCK_DEPRECATED_NO_WARNINGS
+// #define _CRT_SECURE_NO_WARNINGS
+// #define s_addr S_un.S_addr
+
+#else
+
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+
+#include <netinet/in.h>
+#include <errno.h>
+
+#endif
+
 
 int debugLevel = 0;//0�����޵�����Ϣ��1������������Ϣ��2�������ӵ�����Ϣ
 // char filename[100] = ".\dnsrelay.txt";
@@ -167,11 +188,54 @@ void initCommand(int argc, char* argv[])
         }
     }
     printf("debuglevel:%d\n", debugLevel);
+    // TODO: 缺少IP合法性的判断
     printf("dns_server_ip:%s\n", dns_server_ip);
     printf("filename:%s\n", filename);
 }
 
-void printPackage (const char *szPrefix, struct sockaddr_in *sa, char *pbBuf, int bufLen, char mode){
+int initSock(){
+    /* 创建 socket 对象
+        AF_INET: 因特网 TCP/IP 地址族 (TODO: IPv4网络？？)
+        SOCK_DGRAM: 以数据报为传输形式
+        IPPROTO_UDP: 采用 UDP 协议
+        (均为socket相关头文件中所定义的常量)
+    */
+    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    /* 创建 socket 网络通信对象
+        typedef struct sockaddr_in {
+            ADDRESS_FAMILY sin_family; // 地址族
+            USHORT sin_port; // 端口号 (注: 网络字节顺序)
+            IN_ADDR sin_addr; // IP地址 (注: 网络字节顺序)
+            CHAR sin_zero[8]; // 保留的空字节 (为使结构体 sockaddr_in 与 sockaddr 大小相同，以便相互转换)
+        }
+
+        INADDR_ANY: (unsigned long)0x00000000  即网络字节顺序的IP地址 0.0.0.0
+    */
+	struct sockaddr_in sockAddr;
+    socklen_t sockLen = sizeof(struct sockaddr_in);
+    sockAddr.sin_family = AF_INET;
+    sockAddr.sin_port = htons(PORT);
+	sockAddr.sin_addr.s_addr = INADDR_ANY;
+    // sockaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	
+    // 绑定 socket 对象与 socket 网络通信对象
+    // 调试中遇到的问题+1，无法绑定53端口，svchost端口占用kill即可
+    // 调试中遇到的问题+1，无法绑定53端口，加上WSA
+    int bindRet = bind(sockfd, (struct sockaddr*) &sockAddr, sockLen);
+    if (bindRet < 0)
+    {
+		printf("Fail to bind port %d\n", PORT);
+		exit(1);
+	}
+    else
+    {
+        printf("Successfully bound port %d\n", PORT);
+    }
+
+    return sockfd;
+}
+
+void printPacket (const char *szPrefix, struct sockaddr_in *sa, char *pbBuf, int bufLen, char mode){
     // Print prefix, ip addr, port and buffer length
     printf ("%s %s:%d (%d bytes) ", szPrefix, inet_ntoa (sa->sin_addr), ntohs (sa->sin_port), bufLen);
 
@@ -201,44 +265,42 @@ void printPackage (const char *szPrefix, struct sockaddr_in *sa, char *pbBuf, in
             ntohs (pwBuf[4]),
             ntohs (pwBuf[5]));
 }
-
-void recvPakages(){
-    //创建socket对象
-    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-
-    //创建网络通信对象
-    struct sockaddr_in addr;
-	addr.sin_family = AF_INET;
-    addr.sin_port = htons(PORT);
-	addr.sin_addr.s_addr = INADDR_ANY;
-    // addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	
+void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen){
+    *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
+}
 
-    //绑定socket对象与通信链接
-    int ret = bind (sockfd, (struct sockaddr *) &addr, sizeof (struct sockaddr_in));
-    if (ret < 0){
-		printf("Fail to bind port %d\n", PORT);
-		exit(1);
+void InitWSA ()
+{
+#ifdef WIN32
+	// Init WSA on Windows
+	struct WSAData WSAData;
+	if (WSAStartup (MAKEWORD (2, 2), &WSAData))
+	{
+		printf ("WSAStartup() error\n");
+		exit (1);
 	}
-    else{
-        printf("Successfully bound port %d\n", PORT);
-    }
-	
-    struct sockaddr_in saFrom;
-    socklen_t saLen = sizeof(saFrom);
-    while(1){
-        char buf[PACKET_BUF_SIZE];
-        int bufLen = recvfrom(sockfd, (char *) buf, PACKET_BUF_SIZE, 0, (struct sockaddr *) &saFrom, &saLen);
-        printPackage("RECV from", &saFrom, buf, bufLen, 1);
-    }
-
-    close(sockfd);
+#endif
 }
 
 int main(int argc, char* argv[]) 
 {
     initCommand(argc, argv);
-    recvPakages();
+    
+    InitWSA ();
+    // 创建 socket 对象并初始化
+    int sockfd = initSock();
 
+    // 客户端网络通信对象
+    struct sockaddr_in sockFrom;
+    socklen_t sockLen = sizeof(struct sockaddr_in);
+    while(1){
+        char buf[PACKET_BUF_SIZE];
+        int bufLen;
+        recvPaket(&bufLen, sockfd, buf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
+        printPacket("RECV from", &sockFrom, buf, bufLen, 1);
+    }
+    
+    // close(sockfd);
     return 0;
 }
