@@ -510,7 +510,10 @@ void work(int sockfd)
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8183;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
-                packetSend.header.QDCount = 0;
+                // packetSend.header.QDCount = 0;
+                // 
+                packetSend.header.QDCount = 1;
+                // 
                 packetSend.header.ARCount = 0;
                 packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
@@ -528,7 +531,10 @@ void work(int sockfd)
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8180;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
-				packetSend.header.QDCount = 0;
+				// packetSend.header.QDCount = 0;
+                // 
+                packetSend.header.QDCount = 1;
+                // 
 				packetSend.header.ARCount = 0;
 				packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
