@@ -35,14 +35,16 @@ int debugLevel = 0;//0�����޵�����Ϣ��1������
 char filename[100] = "dnsrelay.txt";
 char dns_server_ip[20] = "192.168.0.1";
 
+#define RECORD_SIZE 4096
 #define BUFFER_SIZE 1024
+#define TIME_OUT 86400
 #define PORT 53
 #define PACKET_BUF_SIZE 4096 // 512字节（RFC1035规定），这个大小可以在互联网上畅通无阻，不会因为路径中某MTU（通常≥576（RFC791））太小而导致分片。
 
 typedef struct DNSHEADER    //DNS报文报头字段
 {
-	unsigned short ID;      //2 bits
-	unsigned short Flag;    //2 bits
+	unsigned short ID;      //2 bytes
+	unsigned short Flag;    //2 bytes
 	/*  Flag字段共包含以下几个字段
 		QR：0表示查询报，1表示响应报。
 		OPCODE：通常值为0（标准查询），其他值为1（反向查询）和2（服务器状态请求）。
@@ -56,21 +58,21 @@ typedef struct DNSHEADER    //DNS报文报头字段
 			值为3表示名字差错。从权威名字服务器返回，表示在查询中指定域名不存在
 
 	*/
-	unsigned short QDCount; //2 bits
-	unsigned short ANCount; //2 bits
-	unsigned short NSCount; //2 bits
-	unsigned short ARCount; //2 bits
+	unsigned short QDCount; //2 bytes
+	unsigned short ANCount; //2 bytes
+	unsigned short NSCount; //2 bytes
+	unsigned short ARCount; //2 bytes
 } dnsHeader;
 
 typedef struct DNSQUERY
 {
 	char* Qname;            //查询域名
-	unsigned short Qtype;   //2 bits
+	unsigned short Qtype;   //2 bytes
 	/*
 	A(1) : IPv4
 	AAAA(28) : IPv6
 	*/
-	unsigned short Qclass;  //IN(1), 2 bits
+	unsigned short Qclass;  //IN(1), 2 bytes
 } dnsQuery;
 
 typedef struct DNSRR
@@ -91,6 +93,17 @@ typedef struct DNSPacket
 	dnsRR authority;
 	dnsRR additional;
 } dnsPacket;
+
+typedef struct idRecord
+{
+	unsigned short ServerID;				//发送给Server的报文ID号
+	unsigned short ClientID;				//发送给Client的报文ID号
+	struct sockaddr_in sa;				//用户的socket address
+	time_t timestamp;					//时间戳
+} IDRecord;
+
+IDRecord IPTable[RECORD_SIZE];			//ID转换表
+unsigned short curID;					//当前取的ID号
 
 int lookUpTxt(char* DN, char* IP)
 {
@@ -227,7 +240,7 @@ int initSock(){
     return sockfd;
 }
 
-void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen)
+void recvPacket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen)
 {
     *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
 }
@@ -366,7 +379,7 @@ void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockT
 void work(int sockfd)
 {
     // 因特网服务端通信对象
-    struct sockaddr_in sockINSerer;
+    struct sockaddr_in sockINServer;
     // 客户端网络通信对象
     struct sockaddr_in sockFrom;
     socklen_t sockLen = sizeof(struct sockaddr_in);
@@ -374,8 +387,11 @@ void work(int sockfd)
     // 接收
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
-    recvPaket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
+    recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket(&sockFrom, recvBuf, recvBufLen);
+
+	time_t curTime;				//当前时间
+	time(&curTime);
 
     dnsPacket packetFrom;
     dnsPacket packetSend;
@@ -399,7 +415,7 @@ void work(int sockfd)
 				packetSend.answer.Name = DN;
 				packetSend.answer.Type = 1;						//类型为A地址
 				packetSend.answer.Class = 1;					//Internet数据
-				packetSend.answer.TTL = 86400;					//生存时间
+				packetSend.answer.TTL = TIME_OUT;					//生存时间
 				packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
 				packetSend.answer.RData = IP;
 			}
@@ -414,7 +430,7 @@ void work(int sockfd)
 				packetSend.answer.Name = DN;
 				packetSend.answer.Type = 1;						//类型为A地址
 				packetSend.answer.Class = 1;					//Internet数据
-				packetSend.answer.TTL = 86400;					//生存时间
+				packetSend.answer.TTL = TIME_OUT;					//生存时间
 				packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
 				packetSend.answer.RData = IP;
 			}
@@ -427,23 +443,63 @@ void work(int sockfd)
 		}
 		else if((packetFrom.header.Flag & 0x8000) == 1)     //若不在表中，需要上传给Internet DNS服务器
 		{
+			int i = 0;
+			while (1)
+			{
+				if (IPTable[i].timestamp && curTime - IPTable[i].timestamp > TIME_OUT)		//寻找ID对应表中的空表项，并清空超时表项
+					IPTable[i].timestamp = 0;
+				if (!IPTable[i].timestamp)			//找到空表项
+					break;
+				i++;
+			}
+			IPTable[i].ClientID = packetFrom.header.ID;			//配置ID对应表				
+			IPTable[i].ServerID = curID++;						
+			memcpy(&(IPTable[i].sa), &sockFrom, sizeof(struct sockaddr_in));
+			IPTable[i].timestamp = curTime;
+
+			memcpy(&packetSend, &packetFrom, sizeof(packetFrom));		//将接收的结构体复制给即将发送的结构体
+			packetSend.header.ID = IPTable[i].ServerID;					//头部ID改为服务器ID
 			//发给Internet DNS服务器
 			//编码发送
+			// 编码 & 发送
+			char sendBuf[PACKET_BUF_SIZE];
+			Encode(&packetSend, sendBuf);
+			// Encode(&packetFrom, sendBuf);
+			int sendBufLen = strlen(sendBuf) * sizeof(char);
+			sendPacket(sockfd, sendBuf, sendBufLen, &sockINServer, &sockLen);		//发送给服务器
 		}
 	}
 	//已知数据包来自Internet Server的情况
 	else
 	{
+		int i = 0;
+		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))	//寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
+		{
+			//找下一个对应表项
+			i++;
+
+			//没找到
+			if (i >= RECORD_SIZE) return;
+		}
+
+		IPTable[i].timestamp = 0;
+		memcpy(&packetSend, &packetFrom, sizeof(packetFrom));		//将接收的结构体复制给即将发送的结构体
+		packetSend.header.ID = IPTable[i].ClientID;					//头部ID改为服务器ID
 		//服务器端ID转换成客户端的报文ID
 		//发给客户端
 		//编码发送
+		char sendBuf[PACKET_BUF_SIZE];
+		Encode(&packetSend, sendBuf);
+		// Encode(&packetFrom, sendBuf);
+		int sendBufLen = strlen(sendBuf) * sizeof(char);
+		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
 	}
-    // 编码 & 发送
+    /*// 编码 & 发送
     char sendBuf[PACKET_BUF_SIZE];
     Encode(&packetSend, sendBuf);
     // Encode(&packetFrom, sendBuf);
     int sendBufLen = strlen(sendBuf) * sizeof(char);
-    sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
+    sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);*/
 }
 
 void InitWSA ()
@@ -466,6 +522,7 @@ int main(int argc, char* argv[])
     InitWSA ();
     // 创建 socket 对象并初始化
     int sockfd = initSock();
+	curID = (unsigned short)time(0);
 
     while(1){
         work(sockfd);
