@@ -438,7 +438,12 @@ void work(int sockfd)
 		//发给客户端
 		//编码发送
 	}
-
+    // 编码 & 发送
+    char sendBuf[PACKET_BUF_SIZE];
+    Encode(&packetSend, sendBuf);
+    // Encode(&packetFrom, sendBuf);
+    int sendBufLen = strlen(sendBuf) * sizeof(char);
+    sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
 }
 
 void InitWSA ()
