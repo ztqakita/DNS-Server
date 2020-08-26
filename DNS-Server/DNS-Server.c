@@ -76,10 +76,10 @@ typedef struct DNSQUERY
 typedef struct DNSRR
 {
 	char* Name;             //restore Domain Name
-	unsigned short Type;    //2 bits
-	unsigned short Class;   //2 bits
-	unsigned int TTL;       //4 bits
-	unsigned short RDLength;//2 bits
+	unsigned short Type;    //16 bits
+	unsigned short Class;   //16 bits
+	unsigned int TTL;       //32 bits
+	unsigned short RDLength;//16 bits
 	char* RData;            //restore IP address
 } dnsRR;
 
@@ -227,84 +227,195 @@ int initSock(){
     return sockfd;
 }
 
-void printPacket (const char *szPrefix, struct sockaddr_in *sa, char *pbBuf, int bufLen, char mode){
-    // Print prefix, ip addr, port and buffer length
-    printf ("%s %s:%d (%d bytes) ", szPrefix, inet_ntoa (sa->sin_addr), ntohs (sa->sin_port), bufLen);
-
-    // mode 1 is simplified logging
-    if (mode == 2) return;
-
-    // Print raw buffer
-    for (int i = 0; i < bufLen; ++i) printf (" %02x", pbBuf[i]);
-
-    // Print packet content
-    int *pwBuf = (int *) pbBuf;
-    int flags = ntohs (pwBuf[1]);
-
-    printf ("\n\tID %04x, QR %d, OPCODE %d, AA %d, TC %d, RD %d, RA %d, Z %d, RCODE %d\n"
-            "\tQDCOUNT %u, ANCOUNT %u, NSCOUNT %u, ARCOUNT %u\n",
-            ntohs (pwBuf[0]),
-            (int) ((flags & 0x8000) >> 15),
-            (int) ((flags & 0x7800) >> 11),
-            (int) ((flags & 0x0400) >> 10),
-            (int) ((flags & 0x0200) >> 9),
-            (int) ((flags & 0x0100) >> 8),
-            (int) ((flags & 0x0080) >> 7),
-            (int) ((flags & 0x0070) >> 4),
-            (int) ((flags & 0x000F) >> 0),
-            ntohs (pwBuf[2]),
-            ntohs (pwBuf[3]),
-            ntohs (pwBuf[4]),
-            ntohs (pwBuf[5]));
-}
-	
-void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen){
+void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen)
+{
     *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
 }
 
-
-
-void work(int sockfd, struct sockaddr_in* sockFrom, socklen_t* sockLen)
+void printPacket (struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
-    char buf[PACKET_BUF_SIZE];
-    int bufLen;
-    recvPaket(&bufLen, sockfd, buf, PACKET_BUF_SIZE, sockFrom, sockLen);
-    printPacket("RECV from", sockFrom, buf, bufLen, 1);
-	dnsPacket Packet;
-	//解码
-	Decode();
-	//编码发送
-	Encode();
-	//已知数据包来自客户端的情况
-	if (Packet.header.Flag & )
-	{
-		char* DN, * IP;
-		if (lookUpTxt(DN, IP))						//若在表中
-		{
-			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
-			{
+    printf("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
+    u_int8_t *buf_8 = (u_int8_t *) buf;
+    printf("Raw bytes:\n");
+    for (int i = 0; i < bufLen; i++) printf ("%02x ", buf_8[i]);
+    printf("\n");
+}
 
-			}
-			else         //若IP不为0.0.0.0
-			{
+void getName(char **name, u_int8_t* startPoint, u_int8_t** endPoint){
+    u_int8_t *nameGap = startPoint;
+    int nameLen = 0;  
+    int namePartNum = 0;
+    while (*nameGap)
+    {
+        namePartNum ++;
+        nameLen += *nameGap + 1;
+        *nameGap = '\0';
+        nameGap = startPoint + nameLen;
+    }
+    *endPoint = nameGap + 1;
 
-			}
-			//发给客户端
-			//编码发送
-		}
-		else      //若不在表中，需要上传给Internet DNS服务器
-		{
-			//发给Internet DNS服务器
-			//编码发送
-		}
-	}
-	//已知数据包来自Internet Server的情况
-	else
-	{
-		//服务器端ID转换成客户端的报文ID
-		//发给客户端
-		//编码发送
-	}
+    *name = malloc(nameLen * sizeof(char));
+    *name[0] = '\0';
+    char* namePart = (char*) (startPoint+1);
+    for (int i = 0; i < namePartNum; i++)
+    {
+        strcat(*name, namePart);
+        namePart += strlen(namePart) + 1;
+        if (i != namePartNum - 1) strcat(*name, ".");
+    }
+}
+
+void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
+{
+    u_int16_t *buf_16 = (u_int16_t *) buf;
+    u_int8_t *buf_8 = (u_int8_t *) buf;
+    // enum ...
+    Packet->header.ID = ntohs (buf_16[0]);
+    Packet->header.Flag = ntohs (buf_16[1]);
+    Packet->header.QDCount = ntohs (buf_16[2]);
+    Packet->header.ANCount = ntohs (buf_16[3]);
+    Packet->header.NSCount = ntohs (buf_16[4]);
+    Packet->header.ARCount = ntohs (buf_16[5]);
+
+    u_int16_t *buf_16_QnameEnd = NULL;
+    getName(&Packet->question.Qname, &buf_8[12], (u_int8_t**) &buf_16_QnameEnd);
+    Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
+    Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
+
+    u_int16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
+    for (int i = 0; i < Packet->header.ANCount; i++)
+    {
+        u_int16_t *buf_16_answer = buf_16_lastEnd;
+        Packet->answer.Name = Packet->question.Qname; // ??
+        Packet->answer.Type = ntohs(buf_16_answer[1]);
+        Packet->answer.Class = ntohs(buf_16_answer[2]);
+        u_int32_t *buf_TTL = (u_int32_t *) &buf_16_answer[3];
+        Packet->answer.TTL = ntohl(buf_TTL[0]);
+        Packet->answer.RDLength = ntohs(buf_16_answer[5]);
+        // Packet->answer.RData = ;
+
+        break;
+        // buf_16_lastEnd = 
+    }
+}
+
+void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
+{
+    printf ("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
+
+    printf("Struct:\n");
+
+    printf("  Header:\n");
+    printf ("\tID %04x,\n"
+            "\tFALG %04x,\n"
+            "\tQDCOUNT %04x,\n"
+            "\tANCOUNT %04x,\n"
+            "\tNSCOUNT %04x,\n"
+            "\tARCOUNT %04x\n",
+            Packet->header.ID,
+            Packet->header.Flag,
+            Packet->header.QDCount,
+            Packet->header.ANCount,
+            Packet->header.NSCount,
+            Packet->header.ARCount
+    );
+    printf("\n");
+
+    printf("  Qustion:\n");
+    printf ("\tQName %s,\n"
+            "\tQType %04x,\n"
+            "\tQClass %04x,\n",
+            Packet->question.Qname,
+            Packet->question.Qtype,
+            Packet->question.Qclass
+    );
+    printf("\n");
+
+    for (int i = 0; i < Packet->header.ANCount; i++)
+    {
+        printf("   Answer %d:\n", i);
+        printf ("\tName %s,\n"
+                "\tType %04x,\n"
+                "\tClass %04x,\n"
+                "\tTTL %08x,\n"
+                "\tRDLength %04x,\n",
+                Packet->answer.Name,
+                Packet->answer.Type,
+                Packet->answer.Class,
+                Packet->answer.TTL,
+                Packet->answer.RDLength
+        );
+        printf("\n");
+    }
+    
+    
+}
+
+void Encode(dnsPacket* Packet, char *buf)
+{
+    buf[0] = 61;
+    buf[1] = 62;
+    buf[2] = '\0';
+}
+
+void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockTo, socklen_t* sockLen)
+{
+    sendto(sockfd, buf, packetSize, 0 ,(struct sockaddr*) sockTo, *sockLen);
+}
+
+void work(int sockfd)
+{
+    // 因特网服务端通信对象
+    struct sockaddr_in sockINSerer;
+    // 客户端网络通信对象
+    struct sockaddr_in sockFrom;
+    socklen_t sockLen = sizeof(struct sockaddr_in);
+
+    // 接收
+    char recvBuf[PACKET_BUF_SIZE];
+    int recvBufLen;
+    recvPaket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
+    printPacket(&sockFrom, recvBuf, recvBufLen);
+
+	// 解码
+    dnsPacket Packet;
+	Decode(&Packet, &sockFrom, recvBuf, recvBufLen);
+    printPacketS(&Packet, &sockFrom, recvBuf, recvBufLen);
+	// 编码发送
+    char sendBuf[PACKET_BUF_SIZE];
+	Encode(&Packet, sendBuf);
+    int sendBufLen = strlen(sendBuf) * sizeof(char);
+    sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
+	// 已知数据包来自客户端的情况
+	// if (Packet.header.Flag & )
+	// {
+	// 	char* DN, * IP;
+	// 	if (lookUpTxt(DN, IP))						//若在表中
+	// 	{
+	// 		if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
+	// 		{
+
+	// 		}
+	// 		else         //若IP不为0.0.0.0
+	// 		{
+
+	// 		}
+	// 		//发给客户端
+	// 		//编码发送
+	// 	}
+	// 	else      //若不在表中，需要上传给Internet DNS服务器
+	// 	{
+	// 		//发给Internet DNS服务器
+	// 		//编码发送
+	// 	}
+	// }
+	// //已知数据包来自Internet Server的情况
+	// else
+	// {
+	// 	//服务器端ID转换成客户端的报文ID
+	// 	//发给客户端
+	// 	//编码发送
+	// }
 
 
 }
@@ -330,11 +441,8 @@ int main(int argc, char* argv[])
     // 创建 socket 对象并初始化
     int sockfd = initSock();
 
-    // 客户端网络通信对象
-    struct sockaddr_in sockFrom;
-    socklen_t sockLen = sizeof(struct sockaddr_in);
     while(1){
-        work(sockfd, &sockFrom, &sockLen);
+        work(sockfd);
     }
     
     // close(sockfd);
