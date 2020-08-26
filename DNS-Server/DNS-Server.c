@@ -270,19 +270,28 @@ void work(int sockfd, struct sockaddr_in* sockFrom, socklen_t* sockLen)
     int bufLen;
     recvPaket(&bufLen, sockfd, buf, PACKET_BUF_SIZE, sockFrom, sockLen);
     printPacket("RECV from", sockFrom, buf, bufLen, 1);
-	dnsPacket Packet;
+	dnsPacket packetFrom;
+    dnsPacket packetSend;
 	//解码
 	Decode();
 	//编码发送
 	Encode();
 	//已知数据包来自客户端的情况
-	if (Packet.header.Flag & )
+	if ((packetFrom.header.Flag & 0x8000) == 0)
 	{
 		char* DN, * IP;
 		if (lookUpTxt(DN, IP))						//若在表中
 		{
 			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
 			{
+				packetSend.header.ID = packetFrom.header.ID;
+				packetSend.header.Flag = 0x8183;
+				packetSend.header.ANCount = 1;
+				packetSend.question.Qname = packetFrom.question.Qname;
+				packetSend.question.Qtype = packetFrom.question.Qtype;
+				packetSend.question.Qclass = packetFrom.question.Qclass;
+				packetSend.answer.Name = DN;
+
 
 			}
 			else         //若IP不为0.0.0.0
@@ -292,7 +301,7 @@ void work(int sockfd, struct sockaddr_in* sockFrom, socklen_t* sockLen)
 			//发给客户端
 			//编码发送
 		}
-		else      //若不在表中，需要上传给Internet DNS服务器
+		else if((packetFrom.header.Flag & 0x8000) == 1)     //若不在表中，需要上传给Internet DNS服务器
 		{
 			//发给Internet DNS服务器
 			//编码发送
