@@ -246,9 +246,9 @@ void recvPacket(int* bufLen, int sockfd, char* buf, int packetSize, struct socka
 }
 
 // 打印以字节形式显示的报文
-void printPacket (struct sockaddr_in *sockFrom, char *buf, int bufLen)
+void printPacket (const char* preface, struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
-    printf("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
+    printf("%s %s:%d (%d bytes)\n", preface, inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
     uint8_t *buf_8 = (uint8_t *) buf;
     printf("Raw bytes:\n");
     for (int i = 0; i < bufLen; i++) printf ("%02x ", buf_8[i]);
@@ -299,22 +299,22 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
     Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
 
-    // Answer部分
-    uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
-    for (int i = 0; i < Packet->header.ANCount; i++)
-    {
-        uint16_t *buf_16_answer = buf_16_lastEnd;
-        Packet->answer.Name = Packet->question.Qname; // ??
-        Packet->answer.Type = ntohs(buf_16_answer[1]);
-        Packet->answer.Class = ntohs(buf_16_answer[2]);
-        uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
-        Packet->answer.TTL = ntohl(buf_TTL[0]);
-        Packet->answer.RDLength = ntohs(buf_16_answer[5]);
-        // Packet->answer.RData = ;
+    // // Answer部分
+    // uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
+    // for (int i = 0; i < Packet->header.ANCount; i++)
+    // {
+    //     uint16_t *buf_16_answer = buf_16_lastEnd;
+    //     Packet->answer.Name = Packet->question.Qname; // ??
+    //     Packet->answer.Type = ntohs(buf_16_answer[1]);
+    //     Packet->answer.Class = ntohs(buf_16_answer[2]);
+    //     uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
+    //     Packet->answer.TTL = ntohl(buf_TTL[0]);
+    //     Packet->answer.RDLength = ntohs(buf_16_answer[5]);
+    //     // Packet->answer.RData = ;
 
-        break;
-        // buf_16_lastEnd = 
-    }
+    //     break;
+    //     // buf_16_lastEnd = 
+    // }
 }
 
 // 打印以结构体形式显示的报文
@@ -376,7 +376,7 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
     
 }
 
-void Encode(dnsPacket* Packet, char *buf)
+void Encode(dnsPacket* Packet, char *buf, int *bufLen)
 {
     char* curBuf = buf;
     uint16_t numTrans = 0;
@@ -443,7 +443,7 @@ void Encode(dnsPacket* Packet, char *buf)
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
         numTransL = htonl(Packet->answer.TTL);
-        memcpy(curBuf, &numTransL, sizeof(uint16_t));
+        memcpy(curBuf, &numTransL, sizeof(uint32_t));
         curBuf += sizeof(uint32_t);
         numTrans = htons(Packet->answer.RDLength);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
@@ -458,6 +458,8 @@ void Encode(dnsPacket* Packet, char *buf)
         break;
         // buf_16_lastEnd = 
     }
+
+    *bufLen = curBuf - buf;
 }
 
 void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockTo, socklen_t* sockLen)
@@ -477,7 +479,7 @@ void work(int sockfd)
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
-    printPacket(&sockFrom, recvBuf, recvBufLen);
+    printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
 	time_t curTime;				//当前时间
 	time(&curTime);
@@ -486,7 +488,7 @@ void work(int sockfd)
     dnsPacket packetSend;
 	// 解码
 	Decode(&packetFrom, &sockFrom, recvBuf, recvBufLen);
-    printPacketS("RECV from", &packetFrom, &sockFrom, recvBufLen);
+    printPacketS("Recv from", &packetFrom, &sockFrom, recvBufLen);
 
 	if ((packetFrom.header.Flag & 0x8000) == 0)
 	{
@@ -527,11 +529,10 @@ void work(int sockfd)
 			}
 			// 编码 & 发送
             char sendBuf[PACKET_BUF_SIZE];
-            printPacketS("Send to", &packetSend, &sockFrom, -1);
-            Encode(&packetSend, sendBuf);
-            printPacket(&sockFrom, sendBuf, 100);
-            // Encode(&packetFrom, sendBuf);
-            int sendBufLen = strlen(sendBuf) * sizeof(char);
+            int sendBufLen = 0;
+            Encode(&packetSend, sendBuf, &sendBufLen);
+            printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
+            printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
             sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
 		}
 		else if((packetFrom.header.Flag & 0x8000) == 1)     //若不在表中，需要上传给Internet DNS服务器
@@ -555,10 +556,11 @@ void work(int sockfd)
 			//发给Internet DNS服务器
 			//编码发送
 			// 编码 & 发送
-			char sendBuf[PACKET_BUF_SIZE];
-			Encode(&packetSend, sendBuf);
-			// Encode(&packetFrom, sendBuf);
-			int sendBufLen = strlen(sendBuf) * sizeof(char);
+            char sendBuf[PACKET_BUF_SIZE];
+            int sendBufLen = 0;
+            Encode(&packetSend, sendBuf, &sendBufLen);
+            printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
+            printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
 			sendPacket(sockfd, sendBuf, sendBufLen, &sockINServer, &sockLen);		//发送给服务器
 		}
 	}
@@ -581,10 +583,11 @@ void work(int sockfd)
 		//服务器端ID转换成客户端的报文ID
 		//发给客户端
 		//编码发送
-		char sendBuf[PACKET_BUF_SIZE];
-		Encode(&packetSend, sendBuf);
-		// Encode(&packetFrom, sendBuf);
-		int sendBufLen = strlen(sendBuf) * sizeof(char);
+        char sendBuf[PACKET_BUF_SIZE];
+        int sendBufLen = 0;
+        Encode(&packetSend, sendBuf, &sendBufLen);
+        printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
+        printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
 	}
     /*// 编码 & 发送
