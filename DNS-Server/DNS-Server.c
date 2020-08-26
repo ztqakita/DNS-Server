@@ -449,12 +449,14 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
 
+        long IPSum = 0;
         for (int i = 0; i < 4; i++)
         {
-            numTrans = htons(Packet->answer.RData[i]);
-            memcpy(curBuf, &numTrans, sizeof(uint16_t));
-            curBuf += sizeof(uint16_t);
+            IPSum = IPSum * 256 + Packet->answer.RData[i];
         }
+        numTrans = htonl(IPSum);
+        memcpy(curBuf, &numTrans, sizeof(uint32_t));
+        curBuf += sizeof(uint32_t);
         break;
         // buf_16_lastEnd = 
     }
