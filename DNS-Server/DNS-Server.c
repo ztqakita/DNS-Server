@@ -397,8 +397,10 @@ void Encode(dnsPacket* Packet, char *buf)
     memcpy(curBuf, &numTrans, sizeof(uint16_t));
     curBuf += sizeof(uint16_t);
 
+	//int len = strlen(Packet->question.Qname);
     // Question部分
-    char Qname[strlen(Packet->question.Qname) + 2];
+    //char Qname[len + 2];
+	char Qname[200];
     char* curPartPos = Qname;
     int lastLen = 0;
     for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
@@ -478,7 +480,9 @@ void work(int sockfd)
 
 	if ((packetFrom.header.Flag & 0x8000) == 0)
 	{
-		char* DN, * IP;
+		char* DN;
+		char IP[4];
+		DN = packetFrom.question.Qname;
 		if (lookUpTxt(DN, IP))						//若在表中
 		{
 			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
@@ -577,7 +581,7 @@ void work(int sockfd)
     Encode(&packetFrom, sendBuf);
     // int sendBufLen = strlen(sendBuf) * sizeof(char);
     // sendBufLen需要修改
-    sendPacket(sockfd, sendBuf, sizeof(dnsPacket), &sockFrom, &sockLen);
+    sendPacket(sockfd, sendBuf, sizeof(dnsPacket), &sockFrom, &sockLen);*/
 }
 
 void InitWSA ()
