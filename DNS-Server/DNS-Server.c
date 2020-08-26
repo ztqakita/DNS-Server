@@ -402,38 +402,44 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
     memcpy(curBuf, &numTrans, sizeof(uint16_t));
     curBuf += sizeof(uint16_t);
 
-	int len = strlen(Packet->question.Qname);
+	
     // Question部分
-    char Qname[len + 2];
-	// char Qname[200];
-    char* curPartPos = Qname;
-    int lastLen = 0;
-    for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
+    for (int i = 0; i < Packet->header.QDCount; i++)
     {
-        if (Packet->question.Qname[i] == '.' || Packet->question.Qname[i] == '\0')
+        int len = strlen(Packet->question.Qname);
+        char Qname[len + 2];
+        // char Qname[200];
+        char* curPartPos = Qname;
+        int lastLen = 0;
+        for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
         {
-            curPartPos[0] = i - lastLen;
-            curPartPos++;
-            strncpy(curPartPos, &Packet->question.Qname[lastLen], i - lastLen);
-            curPartPos += i - lastLen;
-            lastLen = i + 1;
+            if (Packet->question.Qname[i] == '.' || Packet->question.Qname[i] == '\0')
+            {
+                curPartPos[0] = i - lastLen;
+                curPartPos++;
+                strncpy(curPartPos, &Packet->question.Qname[lastLen], i - lastLen);
+                curPartPos += i - lastLen;
+                lastLen = i + 1;
+            }
         }
+        Qname[strlen(Packet->question.Qname)+1] = '\0'; //可能有问题
+        
+        memcpy(curBuf, Qname, sizeof(Qname));
+        curBuf += sizeof(Qname);
+        numTrans = htons(Packet->question.Qtype);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+        numTrans = htons(Packet->question.Qtype);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+        
+        break;
     }
-    Qname[strlen(Packet->question.Qname)+1] = '\0'; //可能有问题
-    
-    memcpy(curBuf, Qname, sizeof(Qname));
-    curBuf += sizeof(Qname);
-    numTrans = htons(Packet->question.Qtype);
-    memcpy(curBuf, &numTrans, sizeof(uint16_t));
-    curBuf += sizeof(uint16_t);
-    numTrans = htons(Packet->question.Qtype);
-    memcpy(curBuf, &numTrans, sizeof(uint16_t));
-    curBuf += sizeof(uint16_t);
 
     // Answer部分
     for (int i = 0; i < Packet->header.ANCount; i++)
     {   
-        numTrans = htons(0x0c0c);
+        numTrans = htons(0xc00c);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
         numTrans = htons(Packet->answer.Type);
