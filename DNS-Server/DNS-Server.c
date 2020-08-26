@@ -318,9 +318,9 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
 }
 
 // 打印以结构体形式显示的报文
-void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
+void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *sockFrom, int bufLen)
 {
-    printf ("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
+    printf ("%s %s:%d (%d bytes)\n", preface, inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
 
     printf("Struct:\n");
 
@@ -330,7 +330,7 @@ void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, in
             "\tQDCOUNT %04x,\n"
             "\tANCOUNT %04x,\n"
             "\tNSCOUNT %04x,\n"
-            "\tARCOUNT %04x\n",
+            "\tARCOUNT %04x,\n",
             Packet->header.ID,
             Packet->header.Flag,
             Packet->header.QDCount,
@@ -352,18 +352,24 @@ void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, in
 
     for (int i = 0; i < Packet->header.ANCount; i++)
     {
-        printf("   Answer %d:\n", i);
+        printf("  Answer %d:\n", i);
         printf ("\tName %s,\n"
                 "\tType %04x,\n"
                 "\tClass %04x,\n"
                 "\tTTL %08x,\n"
-                "\tRDLength %04x,\n",
+                "\tRDLength %04x,\n",  
                 Packet->answer.Name,
                 Packet->answer.Type,
                 Packet->answer.Class,
                 Packet->answer.TTL,
                 Packet->answer.RDLength
         );
+        printf("\tRData");
+        for (int i = 0; i < 4; i++)
+        {
+            printf(" %d",Packet->answer.RData[i]);
+        }
+        printf(",\n");
         printf("\n");
     }
     
@@ -374,10 +380,9 @@ void Encode(dnsPacket* Packet, char *buf)
 {
     char* curBuf = buf;
     uint16_t numTrans = 0;
+    uint32_t numTransL = 0;
 
     // Header部分
-    // Question部分
-    // Answer部分
     numTrans = htons(Packet->header.ID);
     memcpy(curBuf, &numTrans, sizeof(uint16_t));
     curBuf += sizeof(uint16_t);
@@ -397,10 +402,10 @@ void Encode(dnsPacket* Packet, char *buf)
     memcpy(curBuf, &numTrans, sizeof(uint16_t));
     curBuf += sizeof(uint16_t);
 
-	//int len = strlen(Packet->question.Qname);
+	int len = strlen(Packet->question.Qname);
     // Question部分
-    //char Qname[len + 2];
-	char Qname[200];
+    char Qname[len + 2];
+	// char Qname[200];
     char* curPartPos = Qname;
     int lastLen = 0;
     for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
@@ -437,14 +442,19 @@ void Encode(dnsPacket* Packet, char *buf)
         numTrans = htons(Packet->answer.Class);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        uint32_t numTransL = htonl(Packet->answer.TTL);
+        numTransL = htonl(Packet->answer.TTL);
         memcpy(curBuf, &numTransL, sizeof(uint16_t));
         curBuf += sizeof(uint32_t);
         numTrans = htons(Packet->answer.RDLength);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
 
-        // Packet->answer.RData = ;
+        for (int i = 0; i < 4; i++)
+        {
+            numTrans = htons(Packet->answer.RData[i]);
+            memcpy(curBuf, &numTrans, sizeof(uint16_t));
+            curBuf += sizeof(uint16_t);
+        }
         break;
         // buf_16_lastEnd = 
     }
@@ -476,7 +486,7 @@ void work(int sockfd)
     dnsPacket packetSend;
 	// 解码
 	Decode(&packetFrom, &sockFrom, recvBuf, recvBufLen);
-    printPacketS(&packetFrom, &sockFrom, recvBuf, recvBufLen);
+    printPacketS("RECV from", &packetFrom, &sockFrom, recvBufLen);
 
 	if ((packetFrom.header.Flag & 0x8000) == 0)
 	{
@@ -517,7 +527,9 @@ void work(int sockfd)
 			}
 			// 编码 & 发送
             char sendBuf[PACKET_BUF_SIZE];
+            printPacketS("Send to", &packetSend, &sockFrom, -1);
             Encode(&packetSend, sendBuf);
+            printPacket(&sockFrom, sendBuf, 100);
             // Encode(&packetFrom, sendBuf);
             int sendBufLen = strlen(sendBuf) * sizeof(char);
             sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
