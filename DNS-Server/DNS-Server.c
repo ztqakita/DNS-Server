@@ -232,6 +232,7 @@ void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockad
     *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
 }
 
+// 打印以字节形式显示的报文
 void printPacket (struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
     printf("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
@@ -241,6 +242,7 @@ void printPacket (struct sockaddr_in *sockFrom, char *buf, int bufLen)
     printf("\n");
 }
 
+// 获取报文中的name类字段
 void getName(char **name, uint8_t* startPoint, uint8_t** endPoint){
     uint8_t *nameGap = startPoint;
     int nameLen = 0;  
@@ -267,6 +269,7 @@ void getName(char **name, uint8_t* startPoint, uint8_t** endPoint){
 
 void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
+    // Header部分
     uint16_t *buf_16 = (uint16_t *) buf;
     uint8_t *buf_8 = (uint8_t *) buf;
     // enum ...
@@ -277,11 +280,13 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     Packet->header.NSCount = ntohs (buf_16[4]);
     Packet->header.ARCount = ntohs (buf_16[5]);
 
+    // Question部分
     uint16_t *buf_16_QnameEnd = NULL;
     getName(&Packet->question.Qname, &buf_8[12], (uint8_t**) &buf_16_QnameEnd);
     Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
     Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
 
+    // Answer部分
     uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
     for (int i = 0; i < Packet->header.ANCount; i++)
     {
@@ -299,6 +304,7 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     }
 }
 
+// 打印以结构体形式显示的报文
 void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
     printf ("RECV from %s:%d (%d bytes)\n", inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
@@ -353,9 +359,80 @@ void printPacketS(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, in
 
 void Encode(dnsPacket* Packet, char *buf)
 {
-    buf[0] = 61;
-    buf[1] = 62;
-    buf[2] = '\0';
+    char* curBuf = buf;
+    uint16_t numTrans = 0;
+
+    // Header部分
+    // Question部分
+    // Answer部分
+    numTrans = htons(Packet->header.ID);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->header.Flag);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->header.QDCount);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->header.ANCount);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->header.NSCount);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->header.ARCount);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+
+    // Question部分
+    char Qname[strlen(Packet->question.Qname) + 2];
+    char* curPartPos = Qname;
+    int lastLen = 0;
+    for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
+    {
+        if (Packet->question.Qname[i] == '.' || Packet->question.Qname[i] == '\0')
+        {
+            curPartPos[0] = i - lastLen;
+            curPartPos++;
+            strncpy(curPartPos, &Packet->question.Qname[lastLen], i - lastLen);
+            curPartPos += i - lastLen;
+            lastLen = i + 1;
+        }
+    }
+    Qname[strlen(Packet->question.Qname)+1] = '\0'; //可能有问题
+    
+    memcpy(curBuf, Qname, sizeof(Qname));
+    curBuf += sizeof(Qname);
+    numTrans = htons(Packet->question.Qtype);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+    numTrans = htons(Packet->question.Qtype);
+    memcpy(curBuf, &numTrans, sizeof(uint16_t));
+    curBuf += sizeof(uint16_t);
+
+    // Answer部分
+    for (int i = 0; i < Packet->header.ANCount; i++)
+    {   
+        numTrans = htons(0x0c0c);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+        numTrans = htons(Packet->answer.Type);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+        numTrans = htons(Packet->answer.Class);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+        uint32_t numTransL = htonl(Packet->answer.TTL);
+        memcpy(curBuf, &numTransL, sizeof(uint16_t));
+        curBuf += sizeof(uint32_t);
+        numTrans = htons(Packet->answer.RDLength);
+        memcpy(curBuf, &numTrans, sizeof(uint16_t));
+        curBuf += sizeof(uint16_t);
+
+        // Packet->answer.RData = ;
+        break;
+        // buf_16_lastEnd = 
+    }
 }
 
 void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockTo, socklen_t* sockLen)
@@ -440,10 +517,11 @@ void work(int sockfd)
 	}
     // 编码 & 发送
     char sendBuf[PACKET_BUF_SIZE];
-    Encode(&packetSend, sendBuf);
-    // Encode(&packetFrom, sendBuf);
-    int sendBufLen = strlen(sendBuf) * sizeof(char);
-    sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
+    // Encode(&packetSend, sendBuf);
+    Encode(&packetFrom, sendBuf);
+    // int sendBufLen = strlen(sendBuf) * sizeof(char);
+    // sendBufLen需要修改
+    sendPacket(sockfd, sendBuf, sizeof(dnsPacket), &sockFrom, &sockLen);
 }
 
 void InitWSA ()
