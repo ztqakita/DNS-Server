@@ -82,7 +82,7 @@ typedef struct DNSRR
 	unsigned short Class;   //16 bits
 	unsigned int TTL;       //32 bits
 	unsigned short RDLength;//16 bits
-	char* RData;            //restore IP address
+	unsigned char* RData;            //restore IP address
 } dnsRR;
 
 typedef struct DNSPacket
@@ -105,7 +105,7 @@ typedef struct idRecord
 IDRecord IPTable[RECORD_SIZE];			//ID转换表
 unsigned short curID;					//当前取的ID号
 
-int lookUpTxt(char* DN, char* IP)
+int lookUpTxt(char* DN, unsigned char* IP)
 {
 	int flag = 0;
 	FILE* file;
@@ -139,7 +139,7 @@ int lookUpTxt(char* DN, char* IP)
         else
             domainName[strlen(domainName)] = '\0';
 
-        if( strcmp( DN, domainName ))         
+        if( strcmp( DN, domainName ) == 0)         
 		//If domain name can be found in txt, we should give the following IP address
         {
 			char* temp = IPaddr;
@@ -150,13 +150,13 @@ int lookUpTxt(char* DN, char* IP)
 				if (*temp == '.')
 				{
 					*temp = '\0';
-					IP[i] = (char)atoi(transform);
+					IP[i] = (unsigned char)atoi(transform);
 					i++;
 					transform = temp + 1;
 				}
 				temp++;
 			}
-			IP[i] = (char)atoi(transform);
+			IP[i] = (unsigned char)atoi(transform);
 			flag = 1;
         }
     }
@@ -501,15 +501,18 @@ void work(int sockfd)
 	if ((packetFrom.header.Flag & 0x8000) == 0)
 	{
 		char* DN;
-		char IP[4];
+		unsigned char IP[4];
 		DN = packetFrom.question.Qname;
 		if (lookUpTxt(DN, IP))						//若在表中
 		{
-			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
+			if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
 			{
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8183;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
+                packetSend.header.QDCount = 0;
+                packetSend.header.ARCount = 0;
+                packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
 				packetSend.question.Qtype = packetFrom.question.Qtype;
 				packetSend.question.Qclass = packetFrom.question.Qclass;
@@ -525,6 +528,9 @@ void work(int sockfd)
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8180;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
+				packetSend.header.QDCount = 0;
+				packetSend.header.ARCount = 0;
+				packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
 				packetSend.question.Qtype = packetFrom.question.Qtype;
 				packetSend.question.Qclass = packetFrom.question.Qclass;
