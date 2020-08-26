@@ -377,46 +377,50 @@ void work(int sockfd)
     recvPaket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket(&sockFrom, recvBuf, recvBufLen);
 
+    dnsPacket packetFrom;
+    dnsPacket packetSend;
 	// 解码
-    dnsPacket Packet;
-	Decode(&Packet, &sockFrom, recvBuf, recvBufLen);
-    printPacketS(&Packet, &sockFrom, recvBuf, recvBufLen);
-	// 编码发送
+	Decode(&packetFrom, &sockFrom, recvBuf, recvBufLen);
+    printPacketS(&packetFrom, &sockFrom, recvBuf, recvBufLen);
+
+	if ((packetFrom.header.Flag & 0x8000) == 0)
+	{
+		char* DN, * IP;
+		if (lookUpTxt(DN, IP))						//若在表中
+		{
+			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
+			{
+				packetSend.header.ID = packetFrom.header.ID;
+				packetSend.header.Flag = 0x8183;
+				packetSend.header.ANCount = 1;
+				packetSend.question.Qname = packetFrom.question.Qname;
+				packetSend.question.Qtype = packetFrom.question.Qtype;
+				packetSend.question.Qclass = packetFrom.question.Qclass;
+				packetSend.answer.Name = DN;
+			}
+			//发给客户端
+			//编码发送
+		}
+		else if((packetFrom.header.Flag & 0x8000) == 1)     //若不在表中，需要上传给Internet DNS服务器
+		{
+			//发给Internet DNS服务器
+			//编码发送
+		}
+	}
+	//已知数据包来自Internet Server的情况
+	else
+	{
+		//服务器端ID转换成客户端的报文ID
+		//发给客户端
+		//编码发送
+	}
+
+    // 编码 & 发送
     char sendBuf[PACKET_BUF_SIZE];
-	Encode(&Packet, sendBuf);
+	Encode(&packetSend, sendBuf);
+    // Encode(&packetFrom, sendBuf);
     int sendBufLen = strlen(sendBuf) * sizeof(char);
     sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
-	// 已知数据包来自客户端的情况
-	// if (Packet.header.Flag & )
-	// {
-	// 	char* DN, * IP;
-	// 	if (lookUpTxt(DN, IP))						//若在表中
-	// 	{
-	// 		if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
-	// 		{
-
-	// 		}
-	// 		else         //若IP不为0.0.0.0
-	// 		{
-
-	// 		}
-	// 		//发给客户端
-	// 		//编码发送
-	// 	}
-	// 	else      //若不在表中，需要上传给Internet DNS服务器
-	// 	{
-	// 		//发给Internet DNS服务器
-	// 		//编码发送
-	// 	}
-	// }
-	// //已知数据包来自Internet Server的情况
-	// else
-	// {
-	// 	//服务器端ID转换成客户端的报文ID
-	// 	//发给客户端
-	// 	//编码发送
-	// }
-
 
 }
 
