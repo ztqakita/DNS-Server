@@ -35,7 +35,7 @@ char dns_server_ip[20] = "192.168.0.1";
 
 #define BUFFER_SIZE 1024
 #define PORT 53
-#define PACKET_BUF_SIZE 4096
+#define PACKET_BUF_SIZE 4096 // 512字节（RFC1035规定），这个大小可以在互联网上畅通无阻，不会因为路径中某MTU（通常≥576（RFC791））太小而导致分片。
 
 typedef struct DNSHEADER    //DNS报文报头字段
 {
@@ -177,14 +177,16 @@ void initCommand(int argc, char* argv[])
             {
                 if (strcmp(&argv[count][i], ".txt") == 0)
                 {
-                    strcpy_s(filename, sizeof(filename), argv[count]);
+                    // strcpy_s(filename, sizeof(filename), argv[count]);
+                    strncpy(filename, argv[count], sizeof(filename));
                     flag = 1;
                     break;
                 }
                 i++;
             }
             if (flag == 0)
-                strcpy_s(dns_server_ip, sizeof(dns_server_ip), argv[count]);
+                // strcpy_s(dns_server_ip, sizeof(dns_server_ip), argv[count]);
+                strncpy(dns_server_ip, argv[count], sizeof(dns_server_ip));
         }
     }
     printf("debuglevel:%d\n", debugLevel);
