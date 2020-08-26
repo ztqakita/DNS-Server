@@ -1,3 +1,5 @@
+#define  _CRT_SECURE_NO_WARNINGS
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -81,6 +83,12 @@ typedef struct DNSRR
 	char* RData;            //restore IP address
 } dnsRR;
 
+typedef struct DNSPacket
+{
+	dnsHeader header;
+	dnsQuery query;
+	dnsRR rr;
+} dnsPacket;
 
 int lookUpTxt(char* DN, char* IP)
 {
@@ -138,26 +146,6 @@ int lookUpTxt(char* DN, char* IP)
         }
     }
 	return flag;
-}
-
-void DNS_Server()
-{
-	char* DN, * IP;
-	if (lookUpTxt(DN, IP))						//若在表中
-	{
-		if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
-		{
-
-		}
-		else         //若IP不为0.0.0.0
-		{
-					
-		}
-	}
-	else      //若不在表中，需要上传给Internet DNS服务器
-	{
-
-	}
 }
 
 void initCommand(int argc, char* argv[])
@@ -270,6 +258,53 @@ void recvPaket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockad
     *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
 }
 
+
+
+void work(int sockfd, struct sockaddr_in* sockFrom, socklen_t* sockLen)
+{
+    char buf[PACKET_BUF_SIZE];
+    int bufLen;
+    recvPaket(&bufLen, sockfd, buf, PACKET_BUF_SIZE, sockFrom, sockLen);
+    printPacket("RECV from", sockFrom, buf, bufLen, 1);
+	dnsPacket Packet;
+	//解码
+	Decode();
+	//编码发送
+	Encode();
+	//已知数据包来自客户端的情况
+	if (Packet.header.Flag&)
+	{
+		char* DN, * IP;
+		if (lookUpTxt(DN, IP))						//若在表中
+		{
+			if (IP[0] == (char)0 && IP[1] == (char)0 && IP[2] == (char)0 && IP[3] == (char)0)		//若IP为0.0.0.0
+			{
+
+			}
+			else         //若IP不为0.0.0.0
+			{
+
+			}
+			//发给客户端
+			//编码发送
+		}
+		else      //若不在表中，需要上传给Internet DNS服务器
+		{
+			//发给Internet DNS服务器
+			//编码发送
+		}
+	}
+	//已知数据包来自Internet Server的情况
+	else
+	{
+		//服务器端ID转换成客户端的报文ID
+		//发给客户端
+		//编码发送
+	}
+
+
+}
+
 void InitWSA ()
 {
 #ifdef WIN32
@@ -295,10 +330,7 @@ int main(int argc, char* argv[])
     struct sockaddr_in sockFrom;
     socklen_t sockLen = sizeof(struct sockaddr_in);
     while(1){
-        char buf[PACKET_BUF_SIZE];
-        int bufLen;
-        recvPaket(&bufLen, sockfd, buf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
-        printPacket("RECV from", &sockFrom, buf, bufLen, 1);
+        work(sockfd, &sockFrom, &sockLen);
     }
     
     // close(sockfd);
