@@ -86,8 +86,10 @@ typedef struct DNSRR
 typedef struct DNSPacket
 {
 	dnsHeader header;
-	dnsQuery query;
-	dnsRR rr;
+	dnsQuery question;
+	dnsRR answer;
+	dnsRR authority;
+	dnsRR additional;
 } dnsPacket;
 
 int lookUpTxt(char* DN, char* IP)
@@ -274,7 +276,7 @@ void work(int sockfd, struct sockaddr_in* sockFrom, socklen_t* sockLen)
 	//编码发送
 	Encode();
 	//已知数据包来自客户端的情况
-	if (Packet.header.Flag&)
+	if (Packet.header.Flag & )
 	{
 		char* DN, * IP;
 		if (lookUpTxt(DN, IP))						//若在表中
