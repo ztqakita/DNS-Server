@@ -455,13 +455,13 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
 
-        long IPSum = 0;
+        uint32_t IPSum = 0;
         for (int i = 0; i < 4; i++)
         {
             IPSum = IPSum * 256 + Packet->answer.RData[i];
         }
-        numTrans = htonl(IPSum);
-        memcpy(curBuf, &numTrans, sizeof(uint32_t));
+        numTransL = htonl(IPSum);
+        memcpy(curBuf, &numTransL, sizeof(uint32_t));
         curBuf += sizeof(uint32_t);
         break;
         // buf_16_lastEnd = 
@@ -503,14 +503,14 @@ void work(int sockfd)
 		char* DN;
 		unsigned char IP[4];
 		DN = packetFrom.question.Qname;
-		if (lookUpTxt(DN, IP))						//若在表中
+		if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1))						//若在表中
 		{
 			if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
 			{
 				packetSend.header.ID = packetFrom.header.ID;
-				packetSend.header.Flag = 0x8183;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
+				packetSend.header.Flag = 0x8583;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
-                packetSend.header.QDCount = 0;
+                packetSend.header.QDCount = 1;
                 packetSend.header.ARCount = 0;
                 packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
@@ -526,9 +526,9 @@ void work(int sockfd)
 			else         //若IP不为0.0.0.0
 			{
 				packetSend.header.ID = packetFrom.header.ID;
-				packetSend.header.Flag = 0x8180;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
+				packetSend.header.Flag = 0x8580;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
-				packetSend.header.QDCount = 0;
+				packetSend.header.QDCount = 1;
 				packetSend.header.ARCount = 0;
 				packetSend.header.NSCount = 0;
 				packetSend.question.Qname = packetFrom.question.Qname;
@@ -549,7 +549,7 @@ void work(int sockfd)
             printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
             sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
 		}
-		else if((packetFrom.header.Flag & 0x8000) == 1)     //若不在表中，需要上传给Internet DNS服务器
+		else     //若不在表中，需要上传给Internet DNS服务器
 		{
 			int i = 0;
 			while (1)
@@ -573,13 +573,13 @@ void work(int sockfd)
             char sendBuf[PACKET_BUF_SIZE];
             int sendBufLen = 0;
             Encode(&packetSend, sendBuf, &sendBufLen);
-            printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
-            printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
+            printPacketS("Send to", &packetSend, &sockINServer, sendBufLen);
+            printPacket("Send to", &sockINServer, sendBuf, sendBufLen);
 			sendPacket(sockfd, sendBuf, sendBufLen, &sockINServer, &sockLen);		//发送给服务器
 		}
 	}
 	//已知数据包来自Internet Server的情况
-	else
+	else if ((packetFrom.header.Flag & 0x8000) == 1)
 	{
 		int i = 0;
 		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))	//寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
