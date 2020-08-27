@@ -33,7 +33,7 @@
 int debugLevel = 0;//0�����޵�����Ϣ��1������������Ϣ��2�������ӵ�����Ϣ
 // char filename[100] = ".\dnsrelay.txt";
 char filename[100] = "dnsrelay.txt";
-char dns_server_ip[20] = "192.168.0.1";
+char dns_server_ip[20] = "192.168.2.1";
 
 #define RECORD_SIZE 4096
 #define BUFFER_SIZE 1024
@@ -271,10 +271,14 @@ void getName(char **name, uint8_t* startPoint, uint8_t** endPoint){
 
     *name = malloc(nameLen * sizeof(char));
     *name[0] = '\0';
+
+    nameGap = startPoint;
     char* namePart = (char*) (startPoint+1);
     for (int i = 0; i < namePartNum; i++)
     {
         strcat(*name, namePart);
+        *nameGap = strlen(namePart);
+        nameGap += strlen(namePart) + 1;
         namePart += strlen(namePart) + 1;
         if (i != namePartNum - 1) strcat(*name, ".");
     }
@@ -350,28 +354,30 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
     );
     printf("\n");
 
-    for (int i = 0; i < Packet->header.ANCount; i++)
-    {
-        printf("  Answer %d:\n", i);
-        printf ("\tName %s,\n"
-                "\tType %04x,\n"
-                "\tClass %04x,\n"
-                "\tTTL %08x,\n"
-                "\tRDLength %04x,\n",  
-                Packet->answer.Name,
-                Packet->answer.Type,
-                Packet->answer.Class,
-                Packet->answer.TTL,
-                Packet->answer.RDLength
-        );
-        printf("\tRData");
-        for (int i = 0; i < 4; i++)
-        {
-            printf(" %d",Packet->answer.RData[i]);
-        }
-        printf(",\n");
-        printf("\n");
-    }
+    // for (int i = 0; i < Packet->header.ANCount; i++)
+    // {
+    //     printf("  Answer %d:\n", i);
+    //     printf ("\tName %s,\n"
+    //             "\tType %04x,\n"
+    //             "\tClass %04x,\n"
+    //             "\tTTL %08x,\n"
+    //             "\tRDLength %04x,\n",  
+    //             Packet->answer.Name,
+    //             Packet->answer.Type,
+    //             Packet->answer.Class,
+    //             Packet->answer.TTL,
+    //             Packet->answer.RDLength
+    //     );
+    //     printf("\tRData");
+    //     for (int i = 0; i < 4; i++)
+    //     {
+    //         printf(" %d",Packet->answer.RData[i]);
+    //     }
+    //     printf(",\n");
+    //     printf("\n");
+        
+    //     break;
+    // }
     
     
 }
@@ -479,6 +485,10 @@ void work(int sockfd)
 {
     // 因特网服务端通信对象
     struct sockaddr_in sockINServer;
+    sockINServer.sin_family = AF_INET;
+    sockINServer.sin_port = htons(PORT);
+	sockINServer.sin_addr.s_addr = inet_addr(dns_server_ip);
+    
     // 客户端网络通信对象
     struct sockaddr_in sockFrom;
     socklen_t sockLen = sizeof(struct sockaddr_in);
@@ -579,7 +589,7 @@ void work(int sockfd)
 		}
 	}
 	//已知数据包来自Internet Server的情况
-	else if ((packetFrom.header.Flag & 0x8000) == 1)
+	else
 	{
 		int i = 0;
 		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))	//寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
@@ -592,25 +602,19 @@ void work(int sockfd)
 		}
 
 		IPTable[i].timestamp = 0;
-		memcpy(&packetSend, &packetFrom, sizeof(packetFrom));		//将接收的结构体复制给即将发送的结构体
-		packetSend.header.ID = IPTable[i].ClientID;					//头部ID改为服务器ID
+
+		packetSend.header.ID = 	htons(IPTable[i].ClientID); //头部ID改为服务器ID
 		//服务器端ID转换成客户端的报文ID
 		//发给客户端
 		//编码发送
         char sendBuf[PACKET_BUF_SIZE];
-        int sendBufLen = 0;
-        Encode(&packetSend, sendBuf, &sendBufLen);
-        printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
-        printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
+        memcpy(sendBuf, recvBuf, sizeof(sendBuf));
+        uint16_t *buf_16 = (uint16_t *) sendBuf;
+        memcpy(buf_16, &packetSend.header.ID, sizeof(uint16_t));
+        int sendBufLen = recvBufLen;
+        printPacket("Send to", &IPTable[i].sa, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
 	}
-    /*// 编码 & 发送
-    char sendBuf[PACKET_BUF_SIZE];
-    // Encode(&packetSend, sendBuf);
-    Encode(&packetFrom, sendBuf);
-    // int sendBufLen = strlen(sendBuf) * sizeof(char);
-    // sendBufLen需要修改
-    sendPacket(sockfd, sendBuf, sizeof(dnsPacket), &sockFrom, &sockLen);*/
 }
 
 void InitWSA ()
