@@ -563,7 +563,7 @@ void work(int sockfd)
 			IPTable[i].ClientID = packetFrom.header.ID;			//配置ID对应表				
 			IPTable[i].ServerID = curID++;						
 			memcpy(&(IPTable[i].sa), &sockFrom, sizeof(struct sockaddr_in));
-			IPTable[i].timestamp = curTime;
+			IPTable[i].timestamp = curTime;                     //
 
 			memcpy(&packetSend, &packetFrom, sizeof(packetFrom));		//将接收的结构体复制给即将发送的结构体
 			packetSend.header.ID = IPTable[i].ServerID;					//头部ID改为服务器ID
