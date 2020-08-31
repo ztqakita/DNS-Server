@@ -508,6 +508,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 		{
 			if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
 			{
+                printf("不良网站拦截模式\n");
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8583;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
@@ -526,6 +527,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 			}
 			else         //若IP不为0.0.0.0
 			{
+                printf("服务器模式\n");
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8580;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
@@ -552,35 +554,36 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 		}
 		else // 所查询的域名不在表中，需要上传给Internet DNS服务器
 		{
+            printf("中继模式-转发查询\n");
 			int i = 0;
 			while (1)
 			{
-				if (IPTable[i].timestamp && curTime - IPTable[i].timestamp > TIME_OUT)		//寻找ID对应表中的空表项，并清空超时表项
+				if (IPTable[i].timestamp && curTime - IPTable[i].timestamp > TIME_OUT) // 寻找ID对应表中的空表项，并清空超时表项
 					IPTable[i].timestamp = 0;
-				if (!IPTable[i].timestamp)			//找到空表项
+				if (!IPTable[i].timestamp) // 找到空表项
 					break;
 				i++;
 			}
-			IPTable[i].ClientID = packetFrom.header.ID;			//配置ID对应表				
+			IPTable[i].ClientID = packetFrom.header.ID; // 配置ID对应表				
 			IPTable[i].ServerID = curID++;						
 			memcpy(&(IPTable[i].sa), &sockFrom, sizeof(struct sockaddr_in));
-			IPTable[i].timestamp = curTime;                     //
+			IPTable[i].timestamp = curTime;
 
-			memcpy(&packetSend, &packetFrom, sizeof(packetFrom));		//将接收的结构体复制给即将发送的结构体
-			packetSend.header.ID = IPTable[i].ServerID;					//头部ID改为服务器ID
-			//发给Internet DNS服务器
-			//编码发送
+			memcpy(&packetSend, &packetFrom, sizeof(packetFrom)); // 将接收的结构体复制给即将发送的结构体
+			packetSend.header.ID = IPTable[i].ServerID; // 将 Header 部分的 ID 域改为服务器 ID
+			// 发给 Internet DNS服务器
 			// 编码 & 发送
             char sendBuf[PACKET_BUF_SIZE];
             int sendBufLen = 0;
             Encode(&packetSend, sendBuf, &sendBufLen);
             printPacketS("Send to", &packetSend, sockINServer, sendBufLen);
             printPacket("Send to", sockINServer, sendBuf, sendBufLen);
-			sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);		//发送给服务器
+			sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);
 		}
 	}
 	else // 数据报来自Internet Server
 	{
+        printf("中继模式-转发应答\n");
 		int i = 0;
         // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
 		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
