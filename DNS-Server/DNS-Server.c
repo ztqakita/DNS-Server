@@ -487,7 +487,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
     // 接收数据报
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
-    if(debugLevel > 0) printf("***接收数据报***");
+    if(debugLevel > 0) printf("***接收数据报***\n");
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
