@@ -487,6 +487,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
     // 接收数据报
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
+    if(debugLevel > 0) printf("***接收数据报***");
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
@@ -508,7 +509,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 		{
 			if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
 			{
-                printf("不良网站拦截模式\n");
+                if(debugLevel > 0) printf("***不良网站拦截模式***\n");
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8583;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
@@ -527,7 +528,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 			}
 			else         //若IP不为0.0.0.0
 			{
-                printf("服务器模式\n");
+                if(debugLevel > 0) printf("***服务器模式***\n");
 				packetSend.header.ID = packetFrom.header.ID;
 				packetSend.header.Flag = 0x8580;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
@@ -554,7 +555,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 		}
 		else // 所查询的域名不在表中，需要上传给Internet DNS服务器
 		{
-            printf("中继模式-转发查询\n");
+            if(debugLevel > 0) printf("***中继模式-转发查询***\n");
 			int i = 0;
 			while (1)
 			{
@@ -583,7 +584,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	}
 	else // 数据报来自Internet Server
 	{
-        printf("中继模式-转发应答\n");
+        if(debugLevel > 0)  printf("***中继模式-转发应答***\n");
 		int i = 0;
         // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
 		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
