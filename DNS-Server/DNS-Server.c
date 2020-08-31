@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 
 #ifdef _WIN32
 
@@ -26,7 +27,7 @@ char dns_server_ip[20] = "114.114.114.114";
 
 #define RECORD_SIZE 4096
 #define BUFFER_SIZE 1024
-#define TIME_OUT 86400
+#define TIME_OUT 8
 #define PORT 53
 #define PACKET_BUF_SIZE 4096 // 512字节（RFC1035规定），这个大小可以在互联网上畅通无阻，不会因为路径中某MTU（通常≥576（RFC791））太小而导致分片。
 
@@ -510,7 +511,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 			{
                 printf("不良网站拦截模式\n");
 				packetSend.header.ID = packetFrom.header.ID;
-				packetSend.header.Flag = 0x8583;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
+				packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
                 packetSend.header.QDCount = 1;
                 packetSend.header.ARCount = 0;
@@ -529,7 +530,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 			{
                 printf("服务器模式\n");
 				packetSend.header.ID = packetFrom.header.ID;
-				packetSend.header.Flag = 0x8580;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
+				packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
 				packetSend.header.ANCount = 1;
 				packetSend.header.QDCount = 1;
 				packetSend.header.ARCount = 0;
