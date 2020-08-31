@@ -1,11 +1,7 @@
-#define  _CRT_SECURE_NO_WARNINGS
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include <time.h>
-#include <stdint.h>
 
 #ifdef _WIN32
 
@@ -13,27 +9,20 @@
 #include <WinSock2.h>
 #include <Ws2tcpip.h>
 #include <Windows.h>
-// #define _WINSOCK_DEPRECATED_NO_WARNINGS
-// #define _CRT_SECURE_NO_WARNINGS
-// #define s_addr S_un.S_addr
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
 
 #else
 
-#include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-
-#include <netinet/in.h>
-#include <errno.h>
 
 #endif
 
 
-int debugLevel = 0;//0�����޵�����Ϣ��1������������Ϣ��2�������ӵ�����Ϣ
-// char filename[100] = ".\dnsrelay.txt";
+int debugLevel = 0;
 char filename[100] = "dnsrelay.txt";
-char dns_server_ip[20] = "192.168.2.1";
+char dns_server_ip[20] = "114.114.114.114";
 
 #define RECORD_SIZE 4096
 #define BUFFER_SIZE 1024
@@ -163,6 +152,19 @@ int lookUpTxt(char* DN, unsigned char* IP)
 	return flag;
 }
 
+void initWSA ()
+{
+#ifdef WIN32
+	// Init WSA on Windows
+	struct WSAData WSAData;
+	if (WSAStartup (MAKEWORD (2, 2), &WSAData))
+	{
+		printf ("WSAStartup() error\n");
+		exit (1);
+	}
+#endif
+}
+
 void initCommand(int argc, char* argv[])
 {
     int count = 1;
@@ -198,14 +200,14 @@ void initCommand(int argc, char* argv[])
     printf("filename:%s\n", filename);
 }
 
-int initSock(){
+void initSock(int* sockfd, struct sockaddr_in* sockINServer){
     /* 创建 socket 对象
-        AF_INET: 因特网 TCP/IP 地址族 (TODO: IPv4网络？？)
+        AF_INET: 因特网 TCP/IP 地址族
         SOCK_DGRAM: 以数据报为传输形式
         IPPROTO_UDP: 采用 UDP 协议
         (均为socket相关头文件中所定义的常量)
     */
-    int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    *sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     /* 创建 socket 网络通信对象
         typedef struct sockaddr_in {
             ADDRESS_FAMILY sin_family; // 地址族
@@ -221,12 +223,9 @@ int initSock(){
     sockAddr.sin_family = AF_INET;
     sockAddr.sin_port = htons(PORT);
 	sockAddr.sin_addr.s_addr = INADDR_ANY;
-    // sockaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	
-    // 绑定 socket 对象与 socket 网络通信对象
-    // 调试中遇到的问题+1，无法绑定53端口，svchost端口占用kill即可
-    // 调试中遇到的问题+1，无法绑定53端口，加上WSA
-    int bindRet = bind(sockfd, (struct sockaddr*) &sockAddr, sockLen);
+    // 绑定 socket 与对应的网络通信对象
+    int bindRet = bind(*sockfd, (struct sockaddr*) &sockAddr, sockLen);
     if (bindRet < 0)
     {
 		printf("Fail to bind port %d\n", PORT);
@@ -237,7 +236,10 @@ int initSock(){
         printf("Successfully bound port %d\n", PORT);
     }
 
-    return sockfd;
+    // 初始化因特网 DNS 服务器网络通信对象
+    sockINServer->sin_family = AF_INET;
+    sockINServer->sin_port = htons(PORT);
+	sockINServer->sin_addr.s_addr = inet_addr(dns_server_ip);
 }
 
 void recvPacket(int* bufLen, int sockfd, char* buf, int packetSize, struct sockaddr_in* sockFrom, socklen_t* sockLen)
@@ -245,18 +247,19 @@ void recvPacket(int* bufLen, int sockfd, char* buf, int packetSize, struct socka
     *bufLen = recvfrom(sockfd, (char*) buf, packetSize, 0, (struct sockaddr *) sockFrom, sockLen);
 }
 
-// 打印以字节形式显示的报文
-void printPacket (const char* preface, struct sockaddr_in *sockFrom, char *buf, int bufLen)
+void printPacket (const char* preface, struct sockaddr_in *sockFrom, char *buf, int bufLen)  // 打印以字节形式显示的报文(debugLevel >= 2)
 {
+    if(debugLevel < 2) return;
+
     printf("%s %s:%d (%d bytes)\n", preface, inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
-    uint8_t *buf_8 = (uint8_t *) buf;
     printf("Raw bytes:\n");
+    uint8_t *buf_8 = (uint8_t *) buf;
     for (int i = 0; i < bufLen; i++) printf ("%02x ", buf_8[i]);
     printf("\n");
 }
 
-// 获取报文中的name类字段
-void getName(char **name, uint8_t* startPoint, uint8_t** endPoint){
+void getName(char **name, uint8_t* startPoint, uint8_t** endPoint)  // 获取报文中的name类字段
+{
     uint8_t *nameGap = startPoint;
     int nameLen = 0;  
     int namePartNum = 0;
@@ -286,10 +289,10 @@ void getName(char **name, uint8_t* startPoint, uint8_t** endPoint){
 
 void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufLen)
 {
-    // Header部分
     uint16_t *buf_16 = (uint16_t *) buf;
     uint8_t *buf_8 = (uint8_t *) buf;
-    // enum ...
+
+    // Header 部分
     Packet->header.ID = ntohs (buf_16[0]);
     Packet->header.Flag = ntohs (buf_16[1]);
     Packet->header.QDCount = ntohs (buf_16[2]);
@@ -297,13 +300,14 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     Packet->header.NSCount = ntohs (buf_16[4]);
     Packet->header.ARCount = ntohs (buf_16[5]);
 
-    // Question部分
+    // Question 部分
     uint16_t *buf_16_QnameEnd = NULL;
     getName(&Packet->question.Qname, &buf_8[12], (uint8_t**) &buf_16_QnameEnd);
     Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
     Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
 
-    // // Answer部分
+    // 仅解码Header和Question，若需解码后续，需区分data部分是IP还是其它内容
+    // // Answer 部分
     // uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
     // for (int i = 0; i < Packet->header.ANCount; i++)
     // {
@@ -321,9 +325,10 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     // }
 }
 
-// 打印以结构体形式显示的报文
-void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *sockFrom, int bufLen)
+void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *sockFrom, int bufLen)  // 打印以结构体形式显示的报文(debugLevel >= 1)
 {
+    if(debugLevel < 1) return;
+
     printf ("%s %s:%d (%d bytes)\n", preface, inet_ntoa (sockFrom->sin_addr), ntohs (sockFrom->sin_port), bufLen);
 
     printf("Struct:\n");
@@ -377,9 +382,7 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
     //     printf("\n");
         
     //     break;
-    // }
-    
-    
+    // } 
 }
 
 void Encode(dnsPacket* Packet, char *buf, int *bufLen)
@@ -388,7 +391,7 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
     uint16_t numTrans = 0;
     uint32_t numTransL = 0;
 
-    // Header部分
+    // Header 部分
     numTrans = htons(Packet->header.ID);
     memcpy(curBuf, &numTrans, sizeof(uint16_t));
     curBuf += sizeof(uint16_t);
@@ -409,12 +412,10 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
     curBuf += sizeof(uint16_t);
 
 	
-    // Question部分
+    // Question 部分，暂时只处理一份（改结构体）
     for (int i = 0; i < Packet->header.QDCount; i++)
     {
-        int len = strlen(Packet->question.Qname);
-        char Qname[len + 2];
-        // char Qname[200];
+        char Qname[strlen(Packet->question.Qname) + 2];
         char* curPartPos = Qname;
         int lastLen = 0;
         for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
@@ -428,7 +429,7 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
                 lastLen = i + 1;
             }
         }
-        Qname[strlen(Packet->question.Qname)+1] = '\0'; //可能有问题
+        Qname[strlen(Packet->question.Qname)+1] = '\0';
         
         memcpy(curBuf, Qname, sizeof(Qname));
         curBuf += sizeof(Qname);
@@ -438,11 +439,9 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
         numTrans = htons(Packet->question.Qtype);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        
-        break;
     }
 
-    // Answer部分
+    // Answer部分，暂时只处理一份（改结构体）
     for (int i = 0; i < Packet->header.ANCount; i++)
     {   
         numTrans = htons(0xc00c);
@@ -469,8 +468,6 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
         numTransL = htonl(IPSum);
         memcpy(curBuf, &numTransL, sizeof(uint32_t));
         curBuf += sizeof(uint32_t);
-        break;
-        // buf_16_lastEnd = 
     }
 
     *bufLen = curBuf - buf;
@@ -481,39 +478,33 @@ void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockT
     sendto(sockfd, buf, packetSize, 0 ,(struct sockaddr*) sockTo, *sockLen);
 }
 
-void work(int sockfd)
-{
-    // 因特网服务端通信对象
-    struct sockaddr_in sockINServer;
-    sockINServer.sin_family = AF_INET;
-    sockINServer.sin_port = htons(PORT);
-	sockINServer.sin_addr.s_addr = inet_addr(dns_server_ip);
-    
+void work(int sockfd, struct sockaddr_in* sockINServer)
+{   
     // 客户端网络通信对象
     struct sockaddr_in sockFrom;
     socklen_t sockLen = sizeof(struct sockaddr_in);
 
-    // 接收
+    // 接收数据报
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
-	time_t curTime;				//当前时间
+	time_t curTime;  // 当前时间
 	time(&curTime);
 
     dnsPacket packetFrom;
     dnsPacket packetSend;
-	// 解码
+	// 解码数据报
 	Decode(&packetFrom, &sockFrom, recvBuf, recvBufLen);
     printPacketS("Recv from", &packetFrom, &sockFrom, recvBufLen);
 
-	if ((packetFrom.header.Flag & 0x8000) == 0)
+    // 区分查询报文与应答报文
+	if ((packetFrom.header.Flag & 0x8000) == 0) // 数据报来自客户端
 	{
-		char* DN;
+		char* DN = packetFrom.question.Qname;
 		unsigned char IP[4];
-		DN = packetFrom.question.Qname;
-		if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1))						//若在表中
+		if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1)) // 所查询的域名在表中
 		{
 			if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
 			{
@@ -559,7 +550,7 @@ void work(int sockfd)
             printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
             sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
 		}
-		else     //若不在表中，需要上传给Internet DNS服务器
+		else // 所查询的域名不在表中，需要上传给Internet DNS服务器
 		{
 			int i = 0;
 			while (1)
@@ -583,66 +574,53 @@ void work(int sockfd)
             char sendBuf[PACKET_BUF_SIZE];
             int sendBufLen = 0;
             Encode(&packetSend, sendBuf, &sendBufLen);
-            printPacketS("Send to", &packetSend, &sockINServer, sendBufLen);
-            printPacket("Send to", &sockINServer, sendBuf, sendBufLen);
-			sendPacket(sockfd, sendBuf, sendBufLen, &sockINServer, &sockLen);		//发送给服务器
+            printPacketS("Send to", &packetSend, sockINServer, sendBufLen);
+            printPacket("Send to", sockINServer, sendBuf, sendBufLen);
+			sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);		//发送给服务器
 		}
 	}
-	//已知数据包来自Internet Server的情况
-	else
+	else // 数据报来自Internet Server
 	{
 		int i = 0;
-		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))	//寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
+        // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
+		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
 		{
 			//找下一个对应表项
 			i++;
-
 			//没找到
 			if (i >= RECORD_SIZE) return;
 		}
 
 		IPTable[i].timestamp = 0;
 
-		packetSend.header.ID = 	htons(IPTable[i].ClientID); //头部ID改为服务器ID
-		//服务器端ID转换成客户端的报文ID
-		//发给客户端
-		//编码发送
+        // 将接收缓存复制至发送缓存
         char sendBuf[PACKET_BUF_SIZE];
         memcpy(sendBuf, recvBuf, sizeof(sendBuf));
         uint16_t *buf_16 = (uint16_t *) sendBuf;
+        // 将 Header 部分的 ID 域改为服务器 ID
+        packetSend.header.ID = 	htons(IPTable[i].ClientID);
         memcpy(buf_16, &packetSend.header.ID, sizeof(uint16_t));
+        // 发送
         int sendBufLen = recvBufLen;
         printPacket("Send to", &IPTable[i].sa, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
 	}
 }
 
-void InitWSA ()
-{
-#ifdef WIN32
-	// Init WSA on Windows
-	struct WSAData WSAData;
-	if (WSAStartup (MAKEWORD (2, 2), &WSAData))
-	{
-		printf ("WSAStartup() error\n");
-		exit (1);
-	}
-#endif
-}
-
 int main(int argc, char* argv[]) 
 {
+    initWSA ();
     initCommand(argc, argv);
-    
-    InitWSA ();
-    // 创建 socket 对象并初始化
-    int sockfd = initSock();
-	curID = (unsigned short)time(0);
 
+    // 创建用于 DNS 服务器的 socket 对象并初始化 & 创建因特网 DNS 服务器通信对象并初始化
+    int sockfd;
+    struct sockaddr_in sockINServer;
+    initSock(&sockfd, &sockINServer);
+
+	curID = (unsigned short)time(0);
     while(1){
-        work(sockfd);
+        work(sockfd, &sockINServer);
     }
     
-    // close(sockfd);
     return 0;
 }
