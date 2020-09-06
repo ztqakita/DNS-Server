@@ -150,6 +150,7 @@ int lookUpTxt(char* DN, unsigned char* IP)
 			flag = 1;
         }
     }
+    fclose(file);
 	return flag;
 }
 
