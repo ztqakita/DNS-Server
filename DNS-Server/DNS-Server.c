@@ -338,8 +338,15 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
         uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
         Packet->answer.TTL = ntohl(buf_TTL[0]);
         Packet->answer.RDLength = ntohs(buf_16_answer[5]);
-        Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
-        memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
+        if(Packet->answer.Type == 1)
+        {
+            uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
+            Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
+            uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
+            *pkg_IP = ntohl(buf_IP[0]);
+            // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
+            // memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
+        }
     }
 }
 
