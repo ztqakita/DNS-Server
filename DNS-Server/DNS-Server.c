@@ -342,11 +342,11 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
         if(Packet->answer.Type == 1)
         {
             uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
-            Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength) * sizeof(unsigned char));
+            Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength + 1) * sizeof(unsigned char));
             uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
             *pkg_IP = ntohl(buf_IP[0]);
+            Packet->answer.RData[Packet->answer.RDLength] = '\0';
             break;
-            //Packet->answer.RData[Packet->answer.RDLength] = '\0';
             // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
             // memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
         }
@@ -557,7 +557,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
             if(strcmp(p->DN, DN) == 0) //在lrucache中找到域名对应的IP
             {
                 IP = p->IP;
-                last->next = p->next;
+                last->next = p->next;   
                 p->next = NULL;
                 lrucache.tail->next = p;
                 lrucache.tail = p;
@@ -662,8 +662,10 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 //将IP-域名表项加入lrucache
                 //printf("11111");
                 p = (Entry *)malloc(sizeof(Entry));
-                p->DN = DN;
-                p->IP = IP;
+                p->DN = (char *)malloc(sizeof(char)*(strlen(DN)+1));
+                strcpy(p->DN, DN);
+                p->IP = (unsigned char *)malloc(sizeof(unsigned char) * (strlen(IP)+1));        //very STRANGE!
+                strcpy(p->IP, IP);
                 lrucache.tail->next = p;
                 lrucache.tail = p;
                 p->next = NULL;
@@ -716,7 +718,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 printPacket("Send to", sockINServer, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);
             }
-            free(IP);
+            //free(IP);
         }
 	}
 	else // 数据报来自Internet Server
