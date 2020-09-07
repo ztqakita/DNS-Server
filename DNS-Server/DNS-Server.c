@@ -341,9 +341,10 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
         if(Packet->answer.Type == 1)
         {
             uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
-            Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
+            Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength + 1) * sizeof(unsigned char));
             uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
             *pkg_IP = ntohl(buf_IP[0]);
+            //Packet->answer.RData[Packet->answer.RDLength] = '\0';
             // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
             // memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
         }
@@ -531,8 +532,8 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	if ((packetFrom.header.Flag & 0x8000) == 0) // 数据报来自客户端
 	{
 		char* DN = packetFrom.question.Qname;
-		unsigned char IP[4];
-
+		unsigned char *IP;
+        IP = (unsigned char *)malloc(4 * sizeof(unsigned char));
         p = lrucache.head;
         int cacheBingo = 0;
 
@@ -540,7 +541,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         {
             if(strcmp(p->DN, DN) == 0) //在lrucache中找到域名对应的IP
             {
-                strcpy(IP, p->IP);
+                IP = p->IP;
                 p->next = NULL;
                 lrucache.tail->next = p;
                 lrucache.tail = p;
@@ -643,7 +644,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 //将IP-域名表项加入lrucache
                 p = (Entry *)malloc(sizeof(Entry));
                 strcpy(p->DN, DN);
-                strcpy(p->IP, IP);
+                p->IP = IP;
                 lrucache.tail->next = p;
                 p->next = NULL;
                 if(lrucache.size > CACHE_SIZE)
@@ -697,28 +698,36 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         if(debugLevel > 0)  printf("***中继模式-转发应答***\n");
 
         //将IP-域名表项加入lrucache
-        p = (Entry *)malloc(sizeof(Entry));
-        strcpy(p->DN, packetFrom.question.Qname);
-        IP = ;
-        strcpy(p->IP, IP);
-        lrucache.tail->next = p;
-        p->next = NULL;
-        if(lrucache.size > CACHE_SIZE)
+        unsigned char *IP;
+        if(packetFrom.answer.Type == 1 && packetFrom.answer.Class == 1)
         {
-            p = lrucache.head->next;
-            lrucache.head->next = p->next;
-            free(p);                    
+            p = (Entry *)malloc(sizeof(Entry));
+            strcpy(p->DN, packetFrom.question.Qname);
+            IP = packetFrom.answer.RData;
+            p->IP = IP;
+            lrucache.tail->next = p;            //将表项加到lrucache表尾
+            p->next = NULL;
+            if(lrucache.size > CACHE_SIZE)
+            {
+                p = lrucache.head->next;
+                lrucache.head->next = p->next;
+                free(p);                    
+            }
+            //将IP-域名表项加入dnsrelay.txt
+            FILE *fp1;
+            fp1 = fopen(filename, "a+");
+            char *write = NULL;
+            //在txt中写入IP地址
+            for(int i = 0; i < 3; i++)
+                fprint(fp1, "%u.", IP[i]);
+            fprint(fp1, "%u", IP[3]);
+            //在对应IP后写入域名
+            strcat(write, " ");
+            strcat(write, packetFrom.question.Qname);
+            strcat(write, "\n");
+            fputs(write, fp1);
+            fclose(fp1);
         }
-        //将IP-域名表项加入dnsrelay.txt
-        FILE *fp1;
-        fp1 = fopen(filename, "a+");
-        char *write = NULL;
-        strcat(write, IP);
-        strcat(write, " ");
-        strcat(write, packetFrom.question.Qname);
-        strcat(write, "\n");
-        fputs(write, fp1);
-        fclose(fp1);
 
 		int i = 0;
         // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
