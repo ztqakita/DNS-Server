@@ -22,7 +22,7 @@
 
 
 int debugLevel = 0;
-char filename[100] = "dnsrelay.txt";
+char filename[100] = "relay.txt";
 char dns_server_ip[20] = "114.114.114.114";
 
 #define RECORD_SIZE 4096
@@ -344,10 +344,12 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
             Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength + 1) * sizeof(unsigned char));
             uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
             *pkg_IP = ntohl(buf_IP[0]);
+            break;
             //Packet->answer.RData[Packet->answer.RDLength] = '\0';
             // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
             // memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
         }
+        buf_16_lastEnd = (uint16_t *)((char *)&buf_16_answer[6] + Packet->answer.RDLength);
     }
 }
 
@@ -386,7 +388,7 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
     printf("\n");
 
     // for (int i = 0; i < Packet->header.ANCount; i++)
-    if(Packet->header.ANCount)
+    if(Packet->header.ANCount && Packet->answer.Type == 1)
     {
         printf("  Answer %d:\n", 1);
         printf ("\tName %s,\n"
@@ -403,7 +405,7 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
         printf("\tRData");
         for (int i = 0; i < 4; i++)
         {
-            printf(" %d",Packet->answer.RData[i]);
+            printf(" %u",Packet->answer.RData[i]);
         }
         printf(",\n");
         printf("\n");
@@ -503,6 +505,18 @@ void sendPacket(int sockfd, char* buf, int packetSize, struct sockaddr_in* sockT
     sendto(sockfd, buf, packetSize, 0 ,(struct sockaddr*) sockTo, *sockLen);
 }
 
+void printCache()
+{
+    Entry *p = lrucache.head->next;
+    printf("-----cache content:-----\n");
+    while(p)
+    {
+        printf("IP: %u.%u.%u.%u  ", p->IP[0], p->IP[1], p->IP[2], p->IP[3]);
+        printf("DN: %s\n", p->DN);
+        p = p->next;
+    }
+}
+
 void work(int sockfd, struct sockaddr_in* sockINServer)
 {   
     // 客户端网络通信对象
@@ -512,7 +526,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
     // 接收数据报
     char recvBuf[PACKET_BUF_SIZE];
     int recvBufLen;
-    if(debugLevel > 0) printf("***接收数据报***\n");
+    if(debugLevel > 0) printf("***Recv Packet***\n");
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
@@ -533,8 +547,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	{
 		char* DN = packetFrom.question.Qname;
 		unsigned char *IP;
-        IP = (unsigned char *)malloc(4 * sizeof(unsigned char));
-        p = lrucache.head;
+        p = lrucache.head->next;
         int cacheBingo = 0;
 
         while(p)  // 查找lrucache
@@ -549,7 +562,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
                 if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***lrucache-不良网站拦截模式***\n");
+                    if(debugLevel > 0) printf("***lrucache - Intercept Mode***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -568,7 +581,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 }
                 else         //若IP不为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***lrucache-服务器模式***\n");
+                    if(debugLevel > 0) printf("***lrucache - Server Mode***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -600,11 +613,12 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
         if(cacheBingo == 0)         //若cache没有命中
         {
+            IP = (unsigned char *)malloc(4 * sizeof(unsigned char));
             if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1)) // 所查询的域名在表中
             {
                 if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***不良网站拦截模式***\n");
+                    if(debugLevel > 0) printf("***Intercept Mode***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -623,7 +637,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 }
                 else         //若IP不为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***服务器模式***\n");
+                    if(debugLevel > 0) printf("***Server Mode***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -642,16 +656,22 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 }
 
                 //将IP-域名表项加入lrucache
+                //printf("11111");
                 p = (Entry *)malloc(sizeof(Entry));
                 strcpy(p->DN, DN);
                 p->IP = IP;
                 lrucache.tail->next = p;
+                lrucache.tail = p;
                 p->next = NULL;
+                printf("put in cache");
+                lrucache.size++;
                 if(lrucache.size > CACHE_SIZE)
                 {
                     p = lrucache.head->next;
                     lrucache.head->next = p->next;
-                    free(p);                    
+                    free(p); 
+                    lrucache.size--; 
+                    printf("delete one in cache");                  
                 }
 
                 // 编码 & 发送
@@ -661,11 +681,12 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
                 printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
+                //free(IP);
             }
             
             else // 所查询的域名不在表中，也不在cache中，需要上传给Internet DNS服务器
             {
-                if(debugLevel > 0) printf("***中继模式-转发查询***\n");
+                if(debugLevel > 0) printf("***Relay Mode - Transmit Request***\n");
                 int i = 0;
                 while (1)
                 {
@@ -691,40 +712,51 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 printPacket("Send to", sockINServer, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);
             }
+            free(IP);
         }
 	}
 	else // 数据报来自Internet Server
 	{
-        if(debugLevel > 0)  printf("***中继模式-转发应答***\n");
+        if(debugLevel > 0)  printf("***Relay Mode - Transmit Response***\n");
 
         //将IP-域名表项加入lrucache
         unsigned char *IP;
+        printf("type:%d, answer:%d\n", packetFrom.answer.Type, packetFrom.answer.Class);
         if(packetFrom.answer.Type == 1 && packetFrom.answer.Class == 1)
         {
             p = (Entry *)malloc(sizeof(Entry));
             strcpy(p->DN, packetFrom.question.Qname);
             IP = packetFrom.answer.RData;
             p->IP = IP;
+            printf("***************DEBUG START******************\n");
+            printf("IP: %u.%u.%u.%u  ", p->IP[0], p->IP[1], p->IP[2], p->IP[3]);
+            printf("DN: %s\n", p->DN);
             lrucache.tail->next = p;            //将表项加到lrucache表尾
+            lrucache.tail = p;
             p->next = NULL;
+            printf("IP: %u.%u.%u.%u  ", lrucache.tail->IP[0], lrucache.tail->IP[1], lrucache.tail->IP[2], lrucache.tail->IP[3]);
+            printf("DN: %s\n", lrucache.tail->DN);
+            printf("***************DEBUG END******************\n");
+            lrucache.size++;
             if(lrucache.size > CACHE_SIZE)
             {
                 p = lrucache.head->next;
                 lrucache.head->next = p->next;
                 free(p);                    
+                lrucache.size--;
             }
             //将IP-域名表项加入dnsrelay.txt
             FILE *fp1;
             fp1 = fopen(filename, "a+");
             char *write = NULL;
+            fprintf(fp1, "\n");
             //在txt中写入IP地址
             for(int i = 0; i < 3; i++)
-                fprint(fp1, "%u.", IP[i]);
-            fprint(fp1, "%u", IP[3]);
+                fprintf(fp1, "%u.", IP[i]);
+            fprintf(fp1, "%u", IP[3]);
             //在对应IP后写入域名
             strcat(write, " ");
             strcat(write, packetFrom.question.Qname);
-            strcat(write, "\n");
             fputs(write, fp1);
             fclose(fp1);
         }
@@ -753,11 +785,13 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         int sendBufLen = recvBufLen;
         printPacket("Send to", &IPTable[i].sa, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
-	}
 
-
-    free(packetFrom.answer.RData);
-    free(packetSend.answer.RData);
+        if(packetFrom.answer.Type == 1)
+        {
+            free(packetFrom.answer.RData);
+        }
+    }
+    printCache();
 }
 
 int main(int argc, char* argv[]) 
@@ -781,5 +815,15 @@ int main(int argc, char* argv[])
         work(sockfd, &sockINServer);
     }
     
+    Entry *p;
+    Entry *q;
+    p = lrucache.head->next;
+    while(p)
+    {
+        q = p;
+        free(q);
+        p = p->next;
+    }
+
     return 0;
 }
