@@ -508,7 +508,8 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
     recvPacket(&recvBufLen, sockfd, recvBuf, PACKET_BUF_SIZE, &sockFrom, &sockLen);
     printPacket("Recv from", &sockFrom, recvBuf, recvBufLen);
 
-	time_t curTime;  // 当前时间
+    // 当前时间
+	time_t curTime;  
 	time(&curTime);
 
     dnsPacket packetFrom;
@@ -528,9 +529,9 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         p = lrucache.head;
         int cacheBingo = 0;
 
-        while(p)
+        while(p)  // 查找lrucache
         {
-            if(strcmp(p->DN, DN) == 0)
+            if(strcmp(p->DN, DN) == 0) //在lrucache中找到域名对应的IP
             {
                 strcpy(IP, p->IP);
                 p->next = NULL;
@@ -540,7 +541,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
                 if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***不良网站拦截模式***\n");
+                    if(debugLevel > 0) printf("***lrucache-不良网站拦截模式***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -559,7 +560,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 }
                 else         //若IP不为0.0.0.0
                 {
-                    if(debugLevel > 0) printf("***服务器模式***\n");
+                    if(debugLevel > 0) printf("***lrucache-服务器模式***\n");
                     packetSend.header.ID = packetFrom.header.ID;
                     packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
                     packetSend.header.ANCount = 1;
@@ -632,7 +633,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                     packetSend.answer.RData = IP;
                 }
 
-                //将IP-域名表项加入lrucache]
+                //将IP-域名表项加入lrucache
                 p = (Entry *)malloc(sizeof(Entry));
                 strcpy(p->DN, DN);
                 strcpy(p->IP, IP);
@@ -688,7 +689,29 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	{
         if(debugLevel > 0)  printf("***中继模式-转发应答***\n");
 
-        packetFrom.header.ID
+        //将IP-域名表项加入lrucache
+        p = (Entry *)malloc(sizeof(Entry));
+        strcpy(p->DN, packetFrom.question.Qname);
+        IP = ;
+        strcpy(p->IP, IP);
+        lrucache.tail->next = p;
+        p->next = NULL;
+        if(lrucache.size > CACHE_SIZE)
+        {
+            p = lrucache.head->next;
+            lrucache.head->next = p->next;
+            free(p);                    
+        }
+        //将IP-域名表项加入dnsrelay.txt
+        FILE *fp1;
+        fp1 = fopen(filename, "a+");
+        char *write = NULL;
+        strcat(write, IP);
+        strcat(write, " ");
+        strcat(write, packetFrom.question.Qname);
+        strcat(write, "\n");
+        fputs(write, fp1);
+        fclose(fp1);
 
 		int i = 0;
         // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
@@ -733,6 +756,7 @@ int main(int argc, char* argv[])
     initSock(&sockfd, &sockINServer);
 
 	curID = (unsigned short)time(0);
+    
     while(1){
         work(sockfd, &sockINServer);
     }
