@@ -84,6 +84,15 @@ typedef struct DNSPacket
 	dnsRR additional;
 } dnsPacket;
 
+//新增IP-域名缓存池
+typedef struct entry
+{
+    unsigned char* IP;
+    char* DN;
+} Entry;
+
+
+
 typedef struct idRecord
 {
 	unsigned short ServerID;				//发送给Server的报文ID号
