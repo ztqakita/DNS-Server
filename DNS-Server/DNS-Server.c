@@ -329,8 +329,7 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     // 仅解码Header和Question，若需解码后续，需区分data部分是IP还是其它内容
     // Answer 部分
     uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
-    // for (int i = 0; i < Packet->header.ANCount; i++)
-    if(Packet->header.ANCount)
+    for (int i = 0; i < Packet->header.ANCount; i++)
     {
         uint16_t *buf_16_answer = buf_16_lastEnd;
         Packet->answer.Name = Packet->question.Qname; // ??
@@ -339,7 +338,8 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
         uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
         Packet->answer.TTL = ntohl(buf_TTL[0]);
         Packet->answer.RDLength = ntohs(buf_16_answer[5]);
-        // Packet->answer.RData = ;
+        Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
+        memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
     }
 }
 
@@ -715,6 +715,10 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         printPacket("Send to", &IPTable[i].sa, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
 	}
+
+
+    free(packetFrom.answer.RData);
+    free(packetSend.answer.RData);
 }
 
 int main(int argc, char* argv[]) 
