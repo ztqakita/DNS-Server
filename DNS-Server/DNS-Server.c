@@ -344,7 +344,8 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
             uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
             Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength + 1) * sizeof(unsigned char));
             uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
-            *pkg_IP = ntohl(buf_IP[0]);
+            // *pkg_IP = ntohl(buf_IP[0]);
+            *pkg_IP = buf_IP[0];
             Packet->answer.RData[Packet->answer.RDLength] = '\0';
             break;
             // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
@@ -464,7 +465,7 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
         numTrans = htons(Packet->question.Qtype);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        numTrans = htons(Packet->question.Qtype);
+        numTrans = htons(Packet->question.Qclass);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
     }
@@ -552,15 +553,18 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         int cacheBingo = 0;
 
         Entry* last = lrucache.head;
-        while(p)  // 查找lrucache
+        while(p && packetFrom.question.Qtype == 1)  // 查找lrucache
         {            
             if(strcmp(p->DN, DN) == 0) //在lrucache中找到域名对应的IP
             {
-                IP = p->IP;
-                last->next = p->next;   
-                p->next = NULL;
-                lrucache.tail->next = p;
-                lrucache.tail = p;
+                if(!(p == lrucache.tail))
+                {
+                    last->next = p->next;
+                    p->next = NULL;
+                    lrucache.tail->next = p;
+                    lrucache.tail = p;
+                }    
+                IP = p->IP;                         
                 cacheBingo = 1;
 
                 if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
@@ -669,7 +673,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 lrucache.tail->next = p;
                 lrucache.tail = p;
                 p->next = NULL;
-                printf("put in cache");
+                printf("put in cache\n");
                 lrucache.size++;
                 if(lrucache.size > CACHE_SIZE)
                 {
@@ -728,12 +732,15 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         //将IP-域名表项加入lrucache
         unsigned char *IP;
         printf("type:%d, class:%d\n", packetFrom.answer.Type, packetFrom.answer.Class);
-        if(packetFrom.answer.Type == 1 && packetFrom.answer.Class == 1)
+        if(packetFrom.question.Qtype == 1 && packetFrom.answer.Class == 1)
         {
+            
             p = (Entry *)malloc(sizeof(Entry));
-            p->DN = packetFrom.question.Qname;
+            p->DN = (char *)malloc(sizeof(char)*(strlen(packetFrom.question.Qname)+1));
+            strcpy(p->DN, packetFrom.question.Qname);
             IP = packetFrom.answer.RData;
-            p->IP = IP;
+            p->IP = (unsigned char *)malloc(sizeof(unsigned char) * (strlen(IP)+1));        //very STRANGE!
+            strcpy(p->IP, IP);
             printf("***************DEBUG START******************\n");
             printf("IP: %u.%u.%u.%u  ", p->IP[0], p->IP[1], p->IP[2], p->IP[3]);
             printf("DN: %s\n", p->DN);
