@@ -1,5 +1,8 @@
 {
     "files.associations": {
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "*.tcc": "c",
+        "complex": "c",
+        "fstream": "c"
     }
 }

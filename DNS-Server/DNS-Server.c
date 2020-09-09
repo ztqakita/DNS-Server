@@ -27,15 +27,15 @@ char dns_server_ip[20] = "114.114.114.114";
 
 #define RECORD_SIZE 4096
 #define BUFFER_SIZE 1024
-#define TIME_OUT 8
+#define TIME_OUT 6
 #define PORT 53
 #define PACKET_BUF_SIZE 4096 // 512字节（RFC1035规定），这个大小可以在互联网上畅通无阻，不会因为路径中某MTU（通常≥576（RFC791））太小而导致分片。
 #define CACHE_SIZE 32
 
 typedef struct DNSHEADER    //DNS报文报头字段
 {
-	unsigned short ID;      //2 bytes
-	unsigned short Flag;    //2 bytes
+	uint16_t ID;      //2 bytes
+	uint16_t Flag;    //2 bytes
 	/*  Flag字段共包含以下几个字段
 		QR：0表示查询报，1表示响应报。
 		OPCODE：通常值为0（标准查询），其他值为1（反向查询）和2（服务器状态请求）。
@@ -49,31 +49,31 @@ typedef struct DNSHEADER    //DNS报文报头字段
 			值为3表示名字差错。从权威名字服务器返回，表示在查询中指定域名不存在
 
 	*/
-	unsigned short QDCount; //2 bytes
-	unsigned short ANCount; //2 bytes
-	unsigned short NSCount; //2 bytes
-	unsigned short ARCount; //2 bytes
+	uint16_t QDCount; //2 bytes
+	uint16_t ANCount; //2 bytes
+	uint16_t NSCount; //2 bytes
+	uint16_t ARCount; //2 bytes
 } dnsHeader;
 
 typedef struct DNSQUERY
 {
 	char* Qname;            //查询域名
-	unsigned short Qtype;   //2 bytes
+	uint16_t Qtype;   //2 bytes
 	/*
 	A(1) : IPv4
 	AAAA(28) : IPv6
 	*/
-	unsigned short Qclass;  //IN(1), 2 bytes
+	uint16_t Qclass;  //IN(1), 2 bytes
 } dnsQuery;
 
 typedef struct DNSRR
 {
 	char* Name;             //restore Domain Name
-	unsigned short Type;    //16 bits
-	unsigned short Class;   //16 bits
-	unsigned int TTL;       //32 bits
-	unsigned short RDLength;//16 bits
-	unsigned char* RData;            //restore IP address
+	uint16_t Type;          //16 bits
+	uint16_t Class;         //16 bits
+	uint32_t TTL;           //32 bits
+	uint16_t RDLength;      //16 bits
+	uint8_t* RData;            //restore IP address
 } dnsRR;
 
 typedef struct DNSPacket
@@ -88,7 +88,7 @@ typedef struct DNSPacket
 //新增IP-域名缓存池
 typedef struct entry
 {
-    unsigned char* IP;
+    uint8_t* IP;
     char* DN;
     struct entry* next;
 } Entry;
@@ -104,16 +104,16 @@ LRUCache lrucache;
 
 typedef struct idRecord
 {
-	unsigned short ServerID;				//发送给Server的报文ID号
-	unsigned short ClientID;				//发送给Client的报文ID号
+	uint16_t ServerID;				//发送给Server的报文ID号
+	uint16_t ClientID;				//发送给Client的报文ID号
 	struct sockaddr_in sa;				//用户的socket address
 	time_t timestamp;					//时间戳
 } IDRecord;
 
 IDRecord IPTable[RECORD_SIZE];			//ID转换表
-unsigned short curID;					//当前取的ID号
+uint16_t curID;					//当前取的ID号
 
-int lookUpTxt(char* DN, unsigned char* IP)
+int lookUpTxt(char* DN, uint8_t* IP)
 {
 	int flag = 0;
 	FILE* file;
@@ -158,13 +158,13 @@ int lookUpTxt(char* DN, unsigned char* IP)
 				if (*temp == '.')
 				{
 					*temp = '\0';
-					IP[i] = (unsigned char)atoi(transform);
+					IP[i] = (uint8_t)atoi(transform);
 					i++;
 					transform = temp + 1;
 				}
 				temp++;
 			}
-			IP[i] = (unsigned char)atoi(transform);
+			IP[i] = (uint8_t)atoi(transform);
 			flag = 1;
         }
     }
@@ -202,7 +202,6 @@ void initCommand(int argc, char* argv[])
             {
                 if (strcmp(&argv[count][i], ".txt") == 0)
                 {
-                    // strcpy_s(filename, sizeof(filename), argv[count]);
                     strncpy(filename, argv[count], sizeof(filename));
                     flag = 1;
                     break;
@@ -210,12 +209,10 @@ void initCommand(int argc, char* argv[])
                 i++;
             }
             if (flag == 0)
-                // strcpy_s(dns_server_ip, sizeof(dns_server_ip), argv[count]);
                 strncpy(dns_server_ip, argv[count], sizeof(dns_server_ip));
         }
     }
     printf("Debug Level: %d\n", debugLevel);
-    // TODO: 缺少IP合法性的判断
     printf("Internet DNS Server: %s\n", dns_server_ip);
     printf("Filename: %s\n", filename);
 }
@@ -326,7 +323,6 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
     Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
 
-    // 仅解码Header和Question，若需解码后续，需区分data部分是IP还是其它内容
     // Answer 部分
     uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
     for (int i = 0; i < Packet->header.ANCount; i++)
@@ -338,18 +334,21 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
         uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
         Packet->answer.TTL = ntohl(buf_TTL[0]);
         Packet->answer.RDLength = ntohs(buf_16_answer[5]);
+
+        uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
+        Packet->answer.RData = (uint8_t*)malloc((4 + 1) * sizeof(uint8_t));
+        uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
         if(Packet->answer.Type == 1)
         {
-            uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
-            Packet->answer.RData = (unsigned char*)malloc((Packet->answer.RDLength + 1) * sizeof(unsigned char));
-            uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
-            // *pkg_IP = ntohl(buf_IP[0]);
             *pkg_IP = buf_IP[0];
             Packet->answer.RData[Packet->answer.RDLength] = '\0';
             break;
-            // Packet->answer.RData = (unsigned char*)malloc(Packet->answer.RDLength * sizeof(unsigned char));
-            // memcpy(Packet->answer.RData, &buf_16_answer[6], Packet->answer.RDLength);
         }
+        else
+        {
+            free(Packet->answer.RData);
+        }
+        
         buf_16_lastEnd = (uint16_t *)((char *)&buf_16_answer[6] + Packet->answer.RDLength);
     }
 }
@@ -548,7 +547,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	if ((packetFrom.header.Flag & 0x8000) == 0) // 数据报来自客户端
 	{
 		char* DN = packetFrom.question.Qname;
-		unsigned char *IP;
+		uint8_t *IP;
         p = lrucache.head->next;
         int cacheBingo = 0;
 
@@ -567,7 +566,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 IP = p->IP;                         
                 cacheBingo = 1;
 
-                if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
+                if (IP[0] == (uint8_t)0 && IP[1] == (uint8_t)0 && IP[2] == (uint8_t)0 && IP[3] == (uint8_t)0)		//若IP为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** LRUCache - Intercept Mode ***\n");
                     packetSend.header.ID = packetFrom.header.ID;
@@ -621,10 +620,10 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
         if(cacheBingo == 0)         //若cache没有命中
         {
-            IP = (unsigned char *)malloc(4 * sizeof(unsigned char));
+            IP = (uint8_t *)malloc(4 * sizeof(uint8_t));
             if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1)) // 所查询的域名在表中
             {
-                if (IP[0] == (unsigned char)0 && IP[1] == (unsigned char)0 && IP[2] == (unsigned char)0 && IP[3] == (unsigned char)0)		//若IP为0.0.0.0
+                if (IP[0] == (uint8_t)0 && IP[1] == (uint8_t)0 && IP[2] == (uint8_t)0 && IP[3] == (uint8_t)0)		//若IP为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** Intercept Mode ***\n");
                     packetSend.header.ID = packetFrom.header.ID;
@@ -667,8 +666,8 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 p = (Entry *)malloc(sizeof(Entry));
                 p->DN = (char *)malloc(sizeof(char)*(strlen(DN)+1));
                 strcpy(p->DN, DN);
-                p->IP = (unsigned char *)malloc(sizeof(unsigned char) * (strlen(IP)+1));        //very STRANGE!
-                strcpy(p->IP, IP);
+                p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (strlen((char *)IP)+1));        //very STRANGE!
+                strcpy((char *)p->IP, (char *)IP);
                 lrucache.tail->next = p;
                 lrucache.tail = p;
                 p->next = NULL;
@@ -703,7 +702,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                     if (!IPTable[i].timestamp) // 找到空表项
                         break;
                     i++;
-                }
+                } 
                 IPTable[i].ClientID = packetFrom.header.ID; // 配置ID对应表				
                 IPTable[i].ServerID = curID++;						
                 memcpy(&(IPTable[i].sa), &sockFrom, sizeof(struct sockaddr_in));
@@ -727,18 +726,33 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	{
         if(debugLevel > 0)  printf("*** Relay Mode - Transmit Response ***\n");
 
+        int i = 0;
+        // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
+		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
+		{
+			//找下一个对应表项
+			i++;
+			//没找到
+			if (i >= RECORD_SIZE) return;
+		}
+
+		IPTable[i].timestamp = 0;
+
         //将IP-域名表项加入lrucache
-        unsigned char *IP;
-        printf("type:%d, class:%d\n", packetFrom.answer.Type, packetFrom.answer.Class);
-        if(packetFrom.question.Qtype == 1 && packetFrom.answer.Class == 1)
+        uint8_t *IP;
+        // printf("type:%d, class:%d\n", packetFrom.answer.Type, packetFrom.answer.Class);
+        if(packetFrom.question.Qtype == 1 && packetFrom.question.Qclass == 1)
         {
             
             p = (Entry *)malloc(sizeof(Entry));
             p->DN = (char *)malloc(sizeof(char)*(strlen(packetFrom.question.Qname)+1));
             strcpy(p->DN, packetFrom.question.Qname);
             IP = packetFrom.answer.RData;
-            p->IP = (unsigned char *)malloc(sizeof(unsigned char) * (strlen(IP)+1));        //very STRANGE!
-            strcpy(p->IP, IP);
+            p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (4+1));        //very STRANGE!
+            if((packetFrom.header.Flag & 0x000f) == 0)
+                strcpy((char *)p->IP, (char *)IP);
+            else
+                strcpy((char *)p->IP, "\0\0\0\0");
             lrucache.tail->next = p;            //将表项加到lrucache表尾
             lrucache.tail = p;
             p->next = NULL;
@@ -765,18 +779,6 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
             fputs(write, fp1);
             fclose(fp1);*/
         }
-
-		int i = 0;
-        // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
-		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
-		{
-			//找下一个对应表项
-			i++;
-			//没找到
-			if (i >= RECORD_SIZE) return;
-		}
-
-		IPTable[i].timestamp = 0;
 
         // 将接收缓存复制至发送缓存
         char sendBuf[PACKET_BUF_SIZE];
@@ -814,7 +816,7 @@ int main(int argc, char* argv[])
     struct sockaddr_in sockINServer;
     initSock(&sockfd, &sockINServer);
 
-	curID = (unsigned short)time(0);
+	curID = (uint16_t)time(0);
     
     while(1){
         work(sockfd, &sockINServer);

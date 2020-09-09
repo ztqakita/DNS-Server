@@ -1,4 +1,5 @@
-114.255.40.166 www.pornhub.com
+10.105.242.83 www.bupt.oj.com
+0.0.0.0 www.notgood.com
 0.0.0.0 008.cn
 0.0.0.0 2qq.cn
 0.0.0.0 555.265.com
