@@ -79,10 +79,10 @@ typedef struct DNSRR
 typedef struct DNSPacket
 {
 	dnsHeader header;
-	dnsQuery question;
-	dnsRR answer;
-	dnsRR authority;
-	dnsRR additional;
+	dnsQuery *question;
+	dnsRR *answer;
+	dnsRR *authority;
+	dnsRR *additional;
 } dnsPacket;
 
 //新增IP-域名缓存池
@@ -318,38 +318,42 @@ void Decode(dnsPacket* Packet, struct sockaddr_in *sockFrom, char *buf, int bufL
     Packet->header.ARCount = ntohs (buf_16[5]);
 
     // Question 部分
+    Packet->question = (dnsQuery*)malloc(sizeof(dnsQuery) * Packet->header.QDCount);
     uint16_t *buf_16_QnameEnd = NULL;
-    getName(&Packet->question.Qname, &buf_8[12], (uint8_t**) &buf_16_QnameEnd);
-    Packet->question.Qtype = ntohs(buf_16_QnameEnd[0]);
-    Packet->question.Qclass = ntohs(buf_16_QnameEnd[1]);
+    for (int i = 0; i < Packet->header.QDCount; i++){      
+        getName(&(Packet->question[i].Qname), &buf_8[12], (uint8_t**) &buf_16_QnameEnd);
+        Packet->question[i].Qtype = ntohs(buf_16_QnameEnd[0]);
+        Packet->question[i].Qclass = ntohs(buf_16_QnameEnd[1]);
+    }
 
     // Answer 部分
     uint16_t *buf_16_lastEnd = buf_16_QnameEnd + 2;
+    Packet->answer = (dnsRR*)malloc(sizeof(dnsRR));
     for (int i = 0; i < Packet->header.ANCount; i++)
     {
         uint16_t *buf_16_answer = buf_16_lastEnd;
-        Packet->answer.Name = Packet->question.Qname; // ??
-        Packet->answer.Type = ntohs(buf_16_answer[1]);
-        Packet->answer.Class = ntohs(buf_16_answer[2]);
+        Packet->answer[0].Name = Packet->question[0].Qname;
+        Packet->answer[0].Type = ntohs(buf_16_answer[1]);
+        Packet->answer[0].Class = ntohs(buf_16_answer[2]);
         uint32_t *buf_TTL = (uint32_t *) &buf_16_answer[3];
-        Packet->answer.TTL = ntohl(buf_TTL[0]);
-        Packet->answer.RDLength = ntohs(buf_16_answer[5]);
+        Packet->answer[0].TTL = ntohl(buf_TTL[0]);
+        Packet->answer[0].RDLength = ntohs(buf_16_answer[5]);
 
         uint32_t *buf_IP = (uint32_t *) &buf_16_answer[6];
-        Packet->answer.RData = (uint8_t*)malloc((4 + 1) * sizeof(uint8_t));
-        uint32_t *pkg_IP = (uint32_t *) Packet->answer.RData;
-        if(Packet->answer.Type == 1)
+        Packet->answer[0].RData = (uint8_t*)malloc((4 + 1) * sizeof(uint8_t));
+        uint32_t *pkg_IP = (uint32_t *) Packet->answer[0].RData;
+        if(Packet->answer[0].Type == 1)
         {
             *pkg_IP = buf_IP[0];
-            Packet->answer.RData[Packet->answer.RDLength] = '\0';
+            Packet->answer[0].RData[Packet->answer[0].RDLength] = '\0';
             break;
         }
         else
         {
-            free(Packet->answer.RData);
+            free(Packet->answer[0].RData);
         }
         
-        buf_16_lastEnd = (uint16_t *)((char *)&buf_16_answer[6] + Packet->answer.RDLength);
+        buf_16_lastEnd = (uint16_t *)((char *)&buf_16_answer[6] + Packet->answer[0].RDLength);
     }
 }
 
@@ -381,14 +385,13 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
     printf ("\tQName %s,\n"
             "\tQType %04x,\n"
             "\tQClass %04x,\n",
-            Packet->question.Qname,
-            Packet->question.Qtype,
-            Packet->question.Qclass
+            Packet->question[0].Qname,
+            Packet->question[0].Qtype,
+            Packet->question[0].Qclass
     );
     printf("\n");
 
-    // for (int i = 0; i < Packet->header.ANCount; i++)
-    if(Packet->header.ANCount && Packet->answer.Type == 1)
+    if(Packet->header.ANCount && Packet->answer[0].Type == 1)
     {
         printf("  Answer %d:\n", 1);
         printf ("\tName %s,\n"
@@ -396,16 +399,16 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
                 "\tClass %04x,\n"
                 "\tTTL %08x,\n"
                 "\tRDLength %04x,\n",  
-                Packet->answer.Name,
-                Packet->answer.Type,
-                Packet->answer.Class,
-                Packet->answer.TTL,
-                Packet->answer.RDLength
+                Packet->answer[0].Name,
+                Packet->answer[0].Type,
+                Packet->answer[0].Class,
+                Packet->answer[0].TTL,
+                Packet->answer[0].RDLength
         );
         printf("\tRData");
         for (int i = 0; i < 4; i++)
         {
-            printf(" %u",Packet->answer.RData[i]);
+            printf(" %u",Packet->answer[0].RData[i]);
         }
         printf(",\n");
         printf("\n");
@@ -439,58 +442,58 @@ void Encode(dnsPacket* Packet, char *buf, int *bufLen)
     curBuf += sizeof(uint16_t);
 
 	
-    // Question 部分，暂时只处理一份（改结构体）
+    // Question 部分
     for (int i = 0; i < Packet->header.QDCount; i++)
     {
-        char Qname[strlen(Packet->question.Qname) + 2];
+        char Qname[strlen(Packet->question[0].Qname) + 2];
         char* curPartPos = Qname;
         int lastLen = 0;
-        for (int i = 0; i < strlen(Packet->question.Qname) + 1; i++)
+        for (int i = 0; i < strlen(Packet->question[0].Qname) + 1; i++)
         {
-            if (Packet->question.Qname[i] == '.' || Packet->question.Qname[i] == '\0')
+            if (Packet->question[0].Qname[i] == '.' || Packet->question[0].Qname[i] == '\0')
             {
                 curPartPos[0] = i - lastLen;
                 curPartPos++;
-                strncpy(curPartPos, &Packet->question.Qname[lastLen], i - lastLen);
+                strncpy(curPartPos, &(Packet->question[0].Qname[lastLen]), i - lastLen);
                 curPartPos += i - lastLen;
                 lastLen = i + 1;
             }
         }
-        Qname[strlen(Packet->question.Qname)+1] = '\0';
+        Qname[strlen(Packet->question[0].Qname)+1] = '\0';
         
         memcpy(curBuf, Qname, sizeof(Qname));
         curBuf += sizeof(Qname);
-        numTrans = htons(Packet->question.Qtype);
+        numTrans = htons(Packet->question[0].Qtype);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        numTrans = htons(Packet->question.Qclass);
+        numTrans = htons(Packet->question[0].Qclass);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
     }
 
-    // Answer部分，暂时只处理一份（改结构体）
+    // Answer部分
     for (int i = 0; i < Packet->header.ANCount; i++)
     {   
         numTrans = htons(0xc00c);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        numTrans = htons(Packet->answer.Type);
+        numTrans = htons(Packet->answer[0].Type);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        numTrans = htons(Packet->answer.Class);
+        numTrans = htons(Packet->answer[0].Class);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
-        numTransL = htonl(Packet->answer.TTL);
+        numTransL = htonl(Packet->answer[0].TTL);
         memcpy(curBuf, &numTransL, sizeof(uint32_t));
         curBuf += sizeof(uint32_t);
-        numTrans = htons(Packet->answer.RDLength);
+        numTrans = htons(Packet->answer[0].RDLength);
         memcpy(curBuf, &numTrans, sizeof(uint16_t));
         curBuf += sizeof(uint16_t);
 
         uint32_t IPSum = 0;
         for (int i = 0; i < 4; i++)
         {
-            IPSum = IPSum * 256 + Packet->answer.RData[i];
+            IPSum = IPSum * 256 + Packet->answer[0].RData[i];
         }
         numTransL = htonl(IPSum);
         memcpy(curBuf, &numTransL, sizeof(uint32_t));
@@ -535,24 +538,46 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 	time_t curTime;  
 	time(&curTime);
 
-    dnsPacket packetFrom;
-    dnsPacket packetSend;
+    dnsPacket* packetFrom = NULL;
+    if(!packetFrom){
+        packetFrom = (dnsPacket*)malloc(sizeof(dnsPacket));
+    }
+    else {
+        free(packetFrom->question);
+        free(packetFrom->answer);
+        free(packetFrom);
+        packetFrom = (dnsPacket*)malloc(sizeof(dnsPacket));
+    }
+    dnsPacket* packetSend;
+    if(!packetSend){
+        packetSend = (dnsPacket*)malloc(sizeof(dnsPacket));
+        packetSend->question = (dnsQuery*)malloc(sizeof(dnsQuery)); 
+        packetSend->answer = (dnsRR*)malloc(sizeof(dnsRR));
+    }
+    else {
+        free(packetSend->question);
+        free(packetSend->answer);
+        free(packetSend);
+        packetSend = (dnsPacket*)malloc(sizeof(dnsPacket));
+        packetSend->question = (dnsQuery*)malloc(sizeof(dnsQuery)); 
+        packetSend->answer = (dnsRR*)malloc(sizeof(dnsRR));
+    }
 	// 解码数据报
-	Decode(&packetFrom, &sockFrom, recvBuf, recvBufLen);
-    printPacketS("Recv from", &packetFrom, &sockFrom, recvBufLen);
+	Decode(packetFrom, &sockFrom, recvBuf, recvBufLen);
+    printPacketS("Recv from", packetFrom, &sockFrom, recvBufLen);
 
     Entry *p;
 
     // 区分查询报文与应答报文
-	if ((packetFrom.header.Flag & 0x8000) == 0) // 数据报来自客户端
+	if ((packetFrom->header.Flag & 0x8000) == 0) // 数据报来自客户端
 	{
-		char* DN = packetFrom.question.Qname;
+		char* DN = packetFrom->question[0].Qname;
 		uint8_t *IP;
         p = lrucache.head->next;
         int cacheBingo = 0;
 
         Entry* last = lrucache.head;
-        while(p && packetFrom.question.Qtype == 1)  // 查找lrucache
+        while(p && packetFrom->question[0].Qtype == 1)  // 查找lrucache
         {            
             if(strcmp(p->DN, DN) == 0) //在lrucache中找到域名对应的IP
             {
@@ -562,53 +587,53 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                     p->next = NULL;
                     lrucache.tail->next = p;
                     lrucache.tail = p;
-                }    
+                }
                 IP = p->IP;                         
                 cacheBingo = 1;
 
                 if (IP[0] == (uint8_t)0 && IP[1] == (uint8_t)0 && IP[2] == (uint8_t)0 && IP[3] == (uint8_t)0)		//若IP为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** LRUCache - Intercept Mode ***\n");
-                    packetSend.header.ID = packetFrom.header.ID;
-                    packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
-                    packetSend.header.ANCount = 1;
-                    packetSend.header.QDCount = 1;
-                    packetSend.header.ARCount = 0;
-                    packetSend.header.NSCount = 0;
-                    packetSend.question.Qname = packetFrom.question.Qname;
-                    packetSend.question.Qtype = packetFrom.question.Qtype;
-                    packetSend.question.Qclass = packetFrom.question.Qclass;
-                    packetSend.answer.Name = DN;
-                    packetSend.answer.Type = 1;						//类型为A地址
-                    packetSend.answer.Class = 1;					//Internet数据
-                    packetSend.answer.TTL = TIME_OUT;					//生存时间
-                    packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
-                    packetSend.answer.RData = IP;
+                    packetSend->header.ID = packetFrom->header.ID;
+                    packetSend->header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
+                    packetSend->header.ANCount = 1;
+                    packetSend->header.QDCount = 1;
+                    packetSend->header.ARCount = 0;
+                    packetSend->header.NSCount = 0;
+                    packetSend->question[0].Qname = packetFrom->question[0].Qname;
+                    packetSend->question[0].Qtype = packetFrom->question[0].Qtype;
+                    packetSend->question[0].Qclass = packetFrom->question[0].Qclass;
+                    packetSend->answer[0].Name = DN;
+                    packetSend->answer[0].Type = 1;						//类型为A地址
+                    packetSend->answer[0].Class = 1;					//Internet数据
+                    packetSend->answer[0].TTL = TIME_OUT;					//生存时间
+                    packetSend->answer[0].RDLength = 4;					//资源数据的字节数为4个字节
+                    packetSend->answer[0].RData = IP;
                 }
                 else         //若IP不为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** LRUCache - Server Mode ***\n");
-                    packetSend.header.ID = packetFrom.header.ID;
-                    packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
-                    packetSend.header.ANCount = 1;
-                    packetSend.header.QDCount = 1;
-                    packetSend.header.ARCount = 0;
-                    packetSend.header.NSCount = 0;
-                    packetSend.question.Qname = packetFrom.question.Qname;
-                    packetSend.question.Qtype = packetFrom.question.Qtype;
-                    packetSend.question.Qclass = packetFrom.question.Qclass;
-                    packetSend.answer.Name = DN;
-                    packetSend.answer.Type = 1;						//类型为A地址
-                    packetSend.answer.Class = 1;					//Internet数据
-                    packetSend.answer.TTL = TIME_OUT;					//生存时间
-                    packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
-                    packetSend.answer.RData = IP;
+                    packetSend->header.ID = packetFrom->header.ID;
+                    packetSend->header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
+                    packetSend->header.ANCount = 1;
+                    packetSend->header.QDCount = 1;
+                    packetSend->header.ARCount = 0;
+                    packetSend->header.NSCount = 0;
+                    packetSend->question[0].Qname = packetFrom->question[0].Qname;
+                    packetSend->question[0].Qtype = packetFrom->question[0].Qtype;
+                    packetSend->question[0].Qclass = packetFrom->question[0].Qclass;
+                    packetSend->answer[0].Name = DN;
+                    packetSend->answer[0].Type = 1;						//类型为A地址
+                    packetSend->answer[0].Class = 1;					//Internet数据
+                    packetSend->answer[0].TTL = TIME_OUT;					//生存时间
+                    packetSend->answer[0].RDLength = 4;					//资源数据的字节数为4个字节
+                    packetSend->answer[0].RData = IP;
                 }
                 // 编码 & 发送
                 char sendBuf[PACKET_BUF_SIZE];
                 int sendBufLen = 0;
-                Encode(&packetSend, sendBuf, &sendBufLen);
-                printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
+                Encode(packetSend, sendBuf, &sendBufLen);
+                printPacketS("Send to", packetSend, &sockFrom, sendBufLen);
                 printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
 
@@ -621,52 +646,52 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
         if(cacheBingo == 0)         //若cache没有命中
         {
             IP = (uint8_t *)malloc(4 * sizeof(uint8_t));
-            if (lookUpTxt(DN, IP) && (packetFrom.question.Qtype == 1) && (packetFrom.question.Qclass == 1)) // 所查询的域名在表中
+            if (lookUpTxt(DN, IP) && (packetFrom->question[0].Qtype == 1) && (packetFrom->question[0].Qclass == 1)) // 所查询的域名在表中
             {
                 if (IP[0] == (uint8_t)0 && IP[1] == (uint8_t)0 && IP[2] == (uint8_t)0 && IP[3] == (uint8_t)0)		//若IP为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** Intercept Mode ***\n");
-                    packetSend.header.ID = packetFrom.header.ID;
-                    packetSend.header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
-                    packetSend.header.ANCount = 1;
-                    packetSend.header.QDCount = 1;
-                    packetSend.header.ARCount = 0;
-                    packetSend.header.NSCount = 0;
-                    packetSend.question.Qname = packetFrom.question.Qname;
-                    packetSend.question.Qtype = packetFrom.question.Qtype;
-                    packetSend.question.Qclass = packetFrom.question.Qclass;
-                    packetSend.answer.Name = DN;
-                    packetSend.answer.Type = 1;						//类型为A地址
-                    packetSend.answer.Class = 1;					//Internet数据
-                    packetSend.answer.TTL = TIME_OUT;					//生存时间
-                    packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
-                    packetSend.answer.RData = IP;
+                    packetSend->header.ID = packetFrom->header.ID;
+                    packetSend->header.Flag = 0x8483;				//QR=1响应报，OPCODE=0标准查询，AA=1，D=1，RA=1允许递归，ROCODE=3指定域名不存在
+                    packetSend->header.ANCount = 1;
+                    packetSend->header.QDCount = 1;
+                    packetSend->header.ARCount = 0;
+                    packetSend->header.NSCount = 0;
+                    packetSend->question[0].Qname = packetFrom->question[0].Qname;
+                    packetSend->question[0].Qtype = packetFrom->question[0].Qtype;
+                    packetSend->question[0].Qclass = packetFrom->question[0].Qclass;
+                    packetSend->answer[0].Name = DN;
+                    packetSend->answer[0].Type = 1;						//类型为A地址
+                    packetSend->answer[0].Class = 1;					//Internet数据
+                    packetSend->answer[0].TTL = TIME_OUT;					//生存时间
+                    packetSend->answer[0].RDLength = 4;					//资源数据的字节数为4个字节
+                    packetSend->answer[0].RData = IP;
                 }
                 else         //若IP不为0.0.0.0
                 {
                     if(debugLevel > 0) printf("*** Server Mode ***\n");
-                    packetSend.header.ID = packetFrom.header.ID;
-                    packetSend.header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
-                    packetSend.header.ANCount = 1;
-                    packetSend.header.QDCount = 1;
-                    packetSend.header.ARCount = 0;
-                    packetSend.header.NSCount = 0;
-                    packetSend.question.Qname = packetFrom.question.Qname;
-                    packetSend.question.Qtype = packetFrom.question.Qtype;
-                    packetSend.question.Qclass = packetFrom.question.Qclass;
-                    packetSend.answer.Name = DN;
-                    packetSend.answer.Type = 1;						//类型为A地址
-                    packetSend.answer.Class = 1;					//Internet数据
-                    packetSend.answer.TTL = TIME_OUT;					//生存时间
-                    packetSend.answer.RDLength = 4;					//资源数据的字节数为4个字节
-                    packetSend.answer.RData = IP;
+                    packetSend->header.ID = packetFrom->header.ID;
+                    packetSend->header.Flag = 0x8480;				//QR=1响应报，OPCODE=0标准查询，RD=1，RA=1允许递归，ROCODE=3指定域名不存在
+                    packetSend->header.ANCount = 1;
+                    packetSend->header.QDCount = 1;
+                    packetSend->header.ARCount = 0;
+                    packetSend->header.NSCount = 0;
+                    packetSend->question[0].Qname = packetFrom->question[0].Qname;
+                    packetSend->question[0].Qtype = packetFrom->question[0].Qtype;
+                    packetSend->question[0].Qclass = packetFrom->question[0].Qclass;
+                    packetSend->answer[0].Name = DN;
+                    packetSend->answer[0].Type = 1;						//类型为A地址
+                    packetSend->answer[0].Class = 1;					//Internet数据
+                    packetSend->answer[0].TTL = TIME_OUT;					//生存时间
+                    packetSend->answer[0].RDLength = 4;					//资源数据的字节数为4个字节
+                    packetSend->answer[0].RData = IP;
                 }
 
                 //将IP-域名表项加入lrucache
                 p = (Entry *)malloc(sizeof(Entry));
                 p->DN = (char *)malloc(sizeof(char)*(strlen(DN)+1));
                 strcpy(p->DN, DN);
-                p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (strlen((char *)IP)+1));        //very STRANGE!
+                p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (strlen((char *)IP)+1));
                 strcpy((char *)p->IP, (char *)IP);
                 lrucache.tail->next = p;
                 lrucache.tail = p;
@@ -684,11 +709,10 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 // 编码 & 发送
                 char sendBuf[PACKET_BUF_SIZE];
                 int sendBufLen = 0;
-                Encode(&packetSend, sendBuf, &sendBufLen);
-                printPacketS("Send to", &packetSend, &sockFrom, sendBufLen);
+                Encode(packetSend, sendBuf, &sendBufLen);
+                printPacketS("Send to", packetSend, &sockFrom, sendBufLen);
                 printPacket("Send to", &sockFrom, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, &sockFrom, &sockLen);
-                //free(IP);
             }
             
             else // 所查询的域名不在表中，也不在cache中，需要上传给Internet DNS服务器
@@ -703,23 +727,22 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                         break;
                     i++;
                 } 
-                IPTable[i].ClientID = packetFrom.header.ID; // 配置ID对应表				
+                IPTable[i].ClientID = packetFrom->header.ID; // 配置ID对应表				
                 IPTable[i].ServerID = curID++;						
                 memcpy(&(IPTable[i].sa), &sockFrom, sizeof(struct sockaddr_in));
                 IPTable[i].timestamp = curTime;
 
-                memcpy(&packetSend, &packetFrom, sizeof(packetFrom)); // 将接收的结构体复制给即将发送的结构体
-                packetSend.header.ID = IPTable[i].ServerID; // 将 Header 部分的 ID 域改为服务器 ID
+                memcpy(packetSend, packetFrom, sizeof(dnsPacket)); // 将接收的结构体复制给即将发送的结构体
+                packetSend->header.ID = IPTable[i].ServerID; // 将 Header 部分的 ID 域改为服务器 ID
                 // 发给 Internet DNS服务器
                 // 编码 & 发送
                 char sendBuf[PACKET_BUF_SIZE];
                 int sendBufLen = 0;
-                Encode(&packetSend, sendBuf, &sendBufLen);
-                printPacketS("Send to", &packetSend, sockINServer, sendBufLen);
+                Encode(packetSend, sendBuf, &sendBufLen);
+                printPacketS("Send to", packetSend, sockINServer, sendBufLen);
                 printPacket("Send to", sockINServer, sendBuf, sendBufLen);
                 sendPacket(sockfd, sendBuf, sendBufLen, sockINServer, &sockLen);
             }
-            //free(IP);
         }
 	}
 	else // 数据报来自Internet Server
@@ -728,7 +751,7 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
         int i = 0;
         // 寻找对应的服务器ID，从而通过ID对应表找到对应的客户端
-		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom.header.ID))
+		while ((curTime - IPTable[i].timestamp > TIME_OUT) || (IPTable[i].ServerID != packetFrom->header.ID))
 		{
 			//找下一个对应表项
 			i++;
@@ -740,16 +763,15 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
         //将IP-域名表项加入lrucache
         uint8_t *IP;
-        // printf("type:%d, class:%d\n", packetFrom.answer.Type, packetFrom.answer.Class);
-        if(packetFrom.question.Qtype == 1 && packetFrom.question.Qclass == 1)
+        if(packetFrom->question[0].Qtype == 1 && packetFrom->question[0].Qclass == 1)
         {
             
             p = (Entry *)malloc(sizeof(Entry));
-            p->DN = (char *)malloc(sizeof(char)*(strlen(packetFrom.question.Qname)+1));
-            strcpy(p->DN, packetFrom.question.Qname);
-            IP = packetFrom.answer.RData;
-            p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (4+1));        //very STRANGE!
-            if((packetFrom.header.Flag & 0x000f) == 0)
+            p->DN = (char *)malloc(sizeof(char)*(strlen(packetFrom->question[0].Qname)+1));
+            strcpy(p->DN, packetFrom->question[0].Qname);
+            IP = packetFrom->answer[0].RData;
+            p->IP = (uint8_t *)malloc(sizeof(uint8_t) * (4+1));
+            if((packetFrom->header.Flag & 0x000f) == 0)
                 strcpy((char *)p->IP, (char *)IP);
             else
                 strcpy((char *)p->IP, "\0\0\0\0");
@@ -764,20 +786,6 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
                 free(p);                    
                 lrucache.size--;
             }
-            //将IP-域名表项加入dnsrelay.txt
-            /*FILE *fp1;
-            fp1 = fopen("1.txt", "a+");
-            char *write = NULL;
-            fprintf(fp1, "\n");
-            //在txt中写入IP地址
-            for(int i = 0; i < 3; i++)
-                fprintf(fp1, "%u.", IP[i]);
-            fprintf(fp1, "%u", IP[3]);
-            //在对应IP后写入域名
-            strcat(write, " ");
-            strcat(write, packetFrom.question.Qname);
-            fputs(write, fp1);
-            fclose(fp1);*/
         }
 
         // 将接收缓存复制至发送缓存
@@ -786,24 +794,19 @@ void work(int sockfd, struct sockaddr_in* sockINServer)
 
         uint16_t *buf_16 = (uint16_t *) sendBuf;
         // 将 Header 部分的 ID 域改为服务器 ID
-        packetSend.header.ID = 	htons(IPTable[i].ClientID);
-        memcpy(buf_16, &packetSend.header.ID, sizeof(uint16_t));
+        packetSend->header.ID = htons(IPTable[i].ClientID);
+        memcpy(buf_16, &(packetSend->header.ID), sizeof(uint16_t));
         // 发送
         int sendBufLen = recvBufLen;
         printPacket("Send to", &IPTable[i].sa, sendBuf, sendBufLen);
 		sendPacket(sockfd, sendBuf, sendBufLen, &IPTable[i].sa, &sockLen);			//发送给ID对应表中和用户对应的socket address
-
-        /*if(packetFrom.answer.Type == 1)
-        {
-            free(packetFrom.answer.RData);
-        }*/
     }
     printCache();
 }
 
 int main(int argc, char* argv[]) 
 {
-    initWSA ();
+    initWSA();
     initCommand(argc, argv);
 
     lrucache.head = (Entry *)malloc(sizeof(Entry));
