@@ -393,7 +393,7 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
 
     if(Packet->header.ANCount && Packet->answer[0].Type == 1)
     {
-        printf("  Answer %d:\n", 1);
+        printf("  Answer:\n");
         printf ("\tName %s,\n"
                 "\tType %04x,\n"
                 "\tClass %04x,\n"
@@ -408,7 +408,8 @@ void printPacketS(const char* preface, dnsPacket* Packet, struct sockaddr_in *so
         printf("\tRData");
         for (int i = 0; i < 4; i++)
         {
-            printf(" %u",Packet->answer[0].RData[i]);
+            if(i == 0) printf(" %u",Packet->answer[0].RData[i]);
+            else printf(".%u",Packet->answer[0].RData[i]);
         }
         printf(",\n");
         printf("\n");
